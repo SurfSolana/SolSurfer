@@ -111,6 +111,7 @@ function toggleReadOnlyMode() {
     });
     paramForm.querySelector('button[type="submit"]').disabled = isReadOnly;
     document.getElementById('restartButton').disabled = isReadOnly;
+	document.getElementById('settingsButton').disabled = isReadOnly;
 }
 
 function initializeReadOnlyMode() {
@@ -213,6 +214,7 @@ function updateFormValues(params) {
         document.getElementById('greedMultiplier').value = params.SENTIMENT_MULTIPLIERS.GREED;
         document.getElementById('extremeGreedMultiplier').value = params.SENTIMENT_MULTIPLIERS.EXTREME_GREED;
     }
+    document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
     updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
 }
 
@@ -356,11 +358,19 @@ socket.on('tradingUpdate', (data) => {
 
 paramForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (readOnlyToggle.checked) {
+	updateParams();
+});
+
+function updateParams () {
+	 if (readOnlyToggle.checked) {
         showFeedback('Cannot update parameters in read-only mode.', 'error');
         return;
     }
     const formData = new FormData(paramForm);
+	
+	const monthlyCostInput = document.getElementById('monthlyCost');
+    const monthlyCost = parseFloat(monthlyCostInput.value);
+	
     const params = {
         SENTIMENT_BOUNDARIES: {
             EXTREME_FEAR: parseInt(formData.get('extremeFearBoundary')),
@@ -373,7 +383,8 @@ paramForm.addEventListener('submit', (e) => {
             FEAR: parseFloat(formData.get('fearMultiplier')),
             GREED: parseFloat(formData.get('greedMultiplier')),
             EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
-        }
+        },
+			USER_MONTHLY_COST: monthlyCost
     };
 
     authenticatedFetch('/api/params', {
@@ -392,7 +403,8 @@ paramForm.addEventListener('submit', (e) => {
             console.error('Error:', error);
             showFeedback('Error updating parameters. Please try again.', 'error');
         });
-});
+}
+
 
 document.getElementById('restartButton').addEventListener('click', function () {
     if (confirm('Are you sure you want to restart trading? This will reset all position data.')) {
@@ -442,6 +454,23 @@ function addToggleButton() {
         cardHeader.appendChild(toggleButton);
     }
 }
+
+// Show the Settings menu when the gear icon is clicked
+document.getElementById('settingsButton').addEventListener('click', function () {
+    document.getElementById('settingsPopup').style.display = 'block';
+    
+    // Blur the main content and disable scrolling
+    document.getElementById('mainContent').classList.add('blur');
+    document.body.classList.add('no-scroll');
+});
+
+document.getElementById('closePopupButton').addEventListener('click', function () {
+    document.getElementById('settingsPopup').style.display = 'none';
+    
+    // Remove the blur and re-enable scrolling
+    document.getElementById('mainContent').classList.remove('blur');
+    document.body.classList.remove('no-scroll');
+});
 
 // Call this function once when the page loads
 document.addEventListener('DOMContentLoaded', addToggleButton);

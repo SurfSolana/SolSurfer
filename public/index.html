@@ -46,7 +46,7 @@
             </div>
             <div class="grid">
                 <div class="card">
-                    <h2>> Trading Parameters</h2>
+                    <h2>> Trading Parameters<button id="settingsButton" class="gear-button"><i class="fa fa-cog"></i></button></h2>
                     <div id="updateFeedback"></div>
                     <form id="paramForm">
                         <div class="form-header">
@@ -107,7 +107,6 @@
                         </div>
                         <div class="button-container">
                             <button type="submit">Update Parameters</button>
-                            <button type="button" id="restartButton">Restart Trading</button>
                         </div>
                     </form>
                 </div>
@@ -119,6 +118,23 @@
                         <!-- Trading data will be inserted here by JavaScript -->
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsPopup" class="popup-menu">
+        <div class="popup-content">
+            <button id="closePopupButton" class="close-popup-button">×</button>
+			<h1>Settings</h1>
+            <div class="button-column">
+                <div class="user-input">
+					<label for="monthlyCost">Montly Cost (USD):</label>
+					<div class="input-container">
+						<input type="number" id="monthlyCost" name="monthlyCost" min="0"
+							max="999" step="0.01">
+					</div>
+                </div>
+                <button type="button" id="restartButton">Restart Trading</button>
             </div>
         </div>
     </div>

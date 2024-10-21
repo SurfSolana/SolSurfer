@@ -46,6 +46,7 @@ PORT=3000
       GREED: 0.03,
       EXTREME_GREED: 0.05
     },
+	USER_MONTHLY_COST: 0,
     DEVELOPER_TIP_PERCENTAGE: 0,
     MONITOR_MODE: false
   };
@@ -380,7 +381,7 @@ function calculateAPY(initialValue, currentValue, runTimeInDays) {
   const yearsElapsed = runTimeInDays / 365;
 
   // User cost (replace with actual user input (0-9999))
-  const monthlyCost = 0;
+  const monthlyCost= parseFloat(tradingParams.USER_MONTHLY_COST);
 
   // The operational costs and exponential APY impact are applied gradually,
   // preventing drastic early distortions in APY calculations.

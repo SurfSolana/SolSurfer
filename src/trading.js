@@ -307,8 +307,12 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
                 lamports: limitedTipValueInLamports
             });
 
+            // Get a new blockhash for each attempt
             const resp = await wallet.connection.getLatestBlockhash("confirmed");
-            console.log("Blockhash:", resp.blockhash);
+            console.log("New Blockhash:", resp.blockhash);
+
+            // Update the blockhash in the swap transaction
+            transaction.message.recentBlockhash = resp.blockhash;
 
             const messageSub = new TransactionMessage({
                 payerKey: wallet.publicKey,
@@ -317,8 +321,9 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
             }).compileToV0Message();
 
             const txSub = new VersionedTransaction(messageSub);
-            txSub.sign([wallet.payer]);
 
+            // Re-sign both transactions with the new blockhash
+            txSub.sign([wallet.payer]);
             transaction.sign([wallet.payer]);
 
             const bundleToSend = [transaction, txSub];
@@ -339,14 +344,14 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
                     ...confirmationResult
                 };
             } else if (confirmationResult.status === "Failed") {
-                console.log("Bundle failed. Retrying with a new quote.");
+                console.log("Bundle failed. Retrying with a new blockhash.");
                 continue;
             } else {
-                console.log("Bundle status inconclusive. Retrying with a new quote.");
+                console.log("Bundle status inconclusive. Retrying with a new blockhash.");
                 continue;
             }
         } catch (error) {
-            console.log(`Error in bundle handling: ${error.message}. Retrying.`);
+            console.log(`Error in bundle handling: ${error.message}. Retrying with a new blockhash.`);
         }
 
         await new Promise(resolve => setTimeout(resolve, 5000));

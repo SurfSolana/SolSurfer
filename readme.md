@@ -145,6 +145,8 @@ TRADE_MULTIPLIER:  15  // Percentage of balance to trade
 
 ## 🏃‍♂️ Running SolSurfer
 
+Either via the start script ```start_surfer```, or manually in your preferred CLI:
+
 1. Start the trading bot:
 ```bash
 npm start

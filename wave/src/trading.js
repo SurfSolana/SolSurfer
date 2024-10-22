@@ -1,6 +1,6 @@
 const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
-const { readSettings } = require('./server');
+const { readSettings } = require('./waveServer');
 const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
@@ -88,9 +88,15 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
 }
 
 function calculateTradeAmount(balance, sentiment, tokenInfo) {
-    const { SENTIMENT_MULTIPLIERS } = readSettings();
-    const sentimentMultiplier = SENTIMENT_MULTIPLIERS[sentiment] || 0;
-    const rawAmount = balance * sentimentMultiplier;
+    const { TRADE_MULTIPLIER } = readSettings();
+
+    // Convert the multiplier from percentage to decimal (e.g., 15% -> 0.15)
+    const positionSizeMultiplier = TRADE_MULTIPLIER / 100;
+
+    // Calculate the raw amount based on the percentage of balance
+    const rawAmount = balance * positionSizeMultiplier;
+
+    // Convert to the appropriate number of decimals for the token
     return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
 }
 

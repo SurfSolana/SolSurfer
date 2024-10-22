@@ -1,14 +1,27 @@
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap');
 
-:root {
-    --solana-purple: #9945FF;
-    --solana-cyan: #14F195;
-    --dark-purple: #6B2FBA;
-    --light-cyan: #A8FED5;
+/* Pulse Theme */
+.pulse-theme {
+    --primary: #9945FF;
+    --secondary: #14F195;
+    --primary-dark: #6B2FBA;
+    --secondary-light: #A8FED5;
     --background: #1E1E2E;
     --card-bg: #2A2A3C;
     --text: #FFFFFF;
     --trade-bg: #3A3A4C;
+}
+
+/* Wave Theme */
+.wave-theme {
+    --primary: #00C2FF;
+    --secondary: #FF6B00;
+    --primary-dark: #0091C2;
+    --secondary-light: #FFB27F;
+    --background: #1A2634;
+    --card-bg: #243446;
+    --text: #FFFFFF;
+    --trade-bg: #2F445A;
 }
 
 body {
@@ -25,12 +38,12 @@ body {
     background-color: var(--card-bg);
     border-radius: 10px;
     padding: 20px;
-    box-shadow: 0 0 20px rgba(153, 69, 255, 0.1);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
 }
 
 h1, h2, h3 {
-    color: var(--solana-cyan);
-    text-shadow: 1px 1px 3px rgba(20, 241, 149, 0.3);
+    color: var(--secondary);
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .grid {
@@ -43,8 +56,8 @@ h1, h2, h3 {
     background-color: var(--card-bg);
     border-radius: 10px;
     padding: 20px;
-    box-shadow: 0 0 10px rgba(153, 69, 255, 0.2);
-    border: 1px solid var(--solana-purple);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--primary);
 }
 
 .sentiment-row {
@@ -61,17 +74,30 @@ h1, h2, h3 {
     margin-bottom: 15px;
 }
 
+#paramForm h3 {
+    margin-top: 20px;
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--primary);
+    color: var(--secondary);
+}
+
+#paramForm h3:first-of-type {
+    margin-top: 10px;
+}
+
 label {
     display: block;
     margin-bottom: 5px;
     font-weight: bold;
-    color: var(--solana-cyan);
+    color: var(--secondary);
 }
 
-input[type="number"] {
+input[type="number"],
+input[type="password"] {
     width: 100%;
     padding: 8px;
-    border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     border-radius: 4px;
     box-sizing: border-box;
     background-color: var(--background);
@@ -79,7 +105,7 @@ input[type="number"] {
 }
 
 button {
-    background-color: var(--solana-purple);
+    background-color: var(--primary);
     color: var(--text);
     border: none;
     padding: 10px 15px;
@@ -90,7 +116,7 @@ button {
 }
 
 button:hover {
-    background-color: var(--dark-purple);
+    background-color: var(--primary-dark);
 }
 
 .trading-data-grid {
@@ -103,7 +129,7 @@ button:hover {
     background-color: var(--background);
     padding: 15px;
     border-radius: 8px;
-    border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     display: flex;
     align-items: center;
 }
@@ -115,7 +141,7 @@ button:hover {
 .data-icon {
     font-size: 24px;
     margin-right: 15px;
-    color: var(--solana-cyan);
+    color: var(--secondary);
 }
 
 .data-content {
@@ -131,7 +157,7 @@ button:hover {
 .data-value {
     font-size: 18px;
     font-weight: bold;
-    color: var(--solana-cyan);
+    color: var(--secondary);
 }
 
 .timestamp {
@@ -149,7 +175,7 @@ button:hover {
 }
 
 .success {
-    background-color: var(--solana-cyan);
+    background-color: var(--secondary);
     color: var(--background);
 }
 
@@ -159,7 +185,7 @@ button:hover {
 }
 
 .info {
-    background-color: var(--solana-purple);
+    background-color: var(--primary);
     color: var(--text);
 }
 
@@ -173,7 +199,7 @@ button:hover {
     width: 100%;
     margin-bottom: 20px;
     position: relative;
-    border: 1px solid var(--solana-cyan);
+    border: 1px solid var(--secondary);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -205,7 +231,7 @@ button:hover {
 .recent-trades h3 {
     margin-top: 0;
     margin-bottom: 10px;
-    color: var(--solana-cyan);
+    color: var(--secondary);
 }
 
 #fgiValue {
@@ -224,10 +250,16 @@ button:hover {
     margin-top: 10px;
 }
 
-#fgiGauge {
+.pulse-theme #fgiGauge {
     width: 100%;
     height: 100%;
     background: linear-gradient(to right, #FF4136, #FF851B, #FFDC00, #2ECC40, #0074D9);
+}
+
+.wave-theme #fgiGauge {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to right, #FF6B00, #FFB27F, #FFDC00, #00C2FF, #0091C2);
 }
 
 #fgiPointer {
@@ -259,7 +291,7 @@ button:hover {
     border-radius: 8px;
     background-color: var(--trade-bg);
     transition: all 0.3s ease;
-    border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     color: var(--text);
     font-size: 14px;
 }
@@ -268,12 +300,20 @@ button:hover {
     background-color: var(--card-bg);
 }
 
-.trade-buy {
-    border-left: 4px solid var(--solana-cyan) !important;
+.pulse-theme .trade-buy {
+    border-left: 4px solid var(--secondary) !important;
 }
 
-.trade-sell {
-    border-left: 4px solid var(--solana-purple) !important;
+.pulse-theme .trade-sell {
+    border-left: 4px solid var(--primary) !important;
+}
+
+.wave-theme .trade-buy {
+    border-left: 4px solid var(--secondary) !important;
+}
+
+.wave-theme .trade-sell {
+    border-left: 4px solid var(--primary) !important;
 }
 
 #tradeList li a {
@@ -283,7 +323,7 @@ button:hover {
 }
 
 #tradeList li a:hover {
-    color: var(--solana-cyan);
+    color: var(--secondary);
 }
 
 .form-header {
@@ -319,7 +359,7 @@ button:hover {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--solana-purple);
+    background-color: var(--primary);
     transition: .4s;
     border-radius: 34px;
 }
@@ -337,7 +377,7 @@ button:hover {
 }
 
 input:checked + .slider {
-    background-color: var(--solana-cyan);
+    background-color: var(--secondary);
 }
 
 input:checked + .slider:before {
@@ -362,18 +402,18 @@ button:disabled {
 }
 
 #restartButton {
-    background-color: var(--solana-cyan);
+    background-color: var(--secondary);
 }
 
 #restartButton:hover {
-    background-color: var(--light-cyan);
+    background-color: var(--secondary-light);
 }
 
 #loginForm {
     background-color: var(--card-bg);
     border-radius: 10px;
     padding: 20px;
-    box-shadow: 0 0 20px rgba(153, 69, 255, 0.1);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
     max-width: 300px;
     margin: 100px auto;
     text-align: center;
@@ -383,7 +423,7 @@ button:disabled {
     width: 100%;
     padding: 10px;
     margin-bottom: 10px;
-    border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     border-radius: 4px;
     background-color: var(--background);
     color: var(--text);
@@ -393,7 +433,7 @@ button:disabled {
 #loginForm button {
     width: 100%;
     padding: 10px;
-    background-color: var(--solana-purple);
+    background-color: var(--primary);
     color: var(--text);
     border: none;
     border-radius: 4px;
@@ -402,7 +442,7 @@ button:disabled {
 
 .price-toggle {
     cursor: pointer;
-    color: var(--solana-cyan);
+    color: var(--secondary);
     margin-left: 10px;
     background: none;
     border: none;
@@ -416,7 +456,6 @@ button:disabled {
     margin-bottom: 10px;
 }
 
-/* START OP POP_UP MENU CODE */
 .gear-button {
     background: none;
     border: none;
@@ -433,11 +472,11 @@ button:disabled {
     transform: translate(-50%, -50%);
     display: none;
     z-index: 1000;
-    background-color: var(--background); /* semi-transparent background */
+    background-color: var(--background);
     width: 300px;
     padding: 10px;
     border-radius: 10px;
-    box-shadow: 0px 0px 10px rgba(153, 69, 255, 0.8);
+    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.8);
 }
 
 .popup-content {
@@ -445,7 +484,7 @@ button:disabled {
     padding: 10px;
     border-radius: 10px;
     text-align: center;
-	border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
 }
 
 .popup-content .close-popup-button {
@@ -455,24 +494,24 @@ button:disabled {
     background: none;
     border: none;
     font-size: 26px;
-    color: var(--solana-cyan);
+    color: var(--secondary);
     cursor: pointer;
 }
 
 .button-column {
     display: flex;
-	flex-direction: column;
+    flex-direction: column;
     justify-content: flex-start;
-	flex-wrap: nowrap;
+    flex-wrap: nowrap;
     margin-top: 20px;
-	width: 100%;
+    width: 100%;
 }
 
 .user-input {
-	border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     border-radius: 8px;
     padding: 10px;
-    margin-bottom: 10px 0;
+    margin-bottom: 10px;
     background-color: var(--card-bg);
 }
 
@@ -482,28 +521,18 @@ button:disabled {
     margin-top: 5px;
 }
 
-.input-container .input[type="number"] {
+.input-container input[type="number"] {
     flex: 1;
     padding: 8px;
-    border: 1px solid var(--solana-purple);
+    border: 1px solid var(--primary);
     border-radius: 4px;
     box-sizing: border-box;
 }
 
-.submit-monthlyCost-button {
-    background-color: var(--solana-purple);
-    color: var(--text);
-    border: none;
-    padding: 8px 12px;
-    margin-left: 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 16px;
-    transition: background-color 0.3s ease;
-}
-
-.submit-monthlyCost-button:hover {
-    background-color: var(--dark-purple);
+.wave-settings {
+    border-top: 1px solid var(--primary);
+    margin-top: 20px;
+    padding-top: 20px;
 }
 
 .blur {

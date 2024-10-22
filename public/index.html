@@ -4,15 +4,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PulseSurfer Trading Bot</title>
+    <title>SolSurfer Trading System</title>
     <link rel="icon" href="/bop_icon.svg" type="image/svg+xml">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 
-<body>
+<body class="pulse-theme">
     <div id="loginForm" style="display: none;">
-        <h1>PulseSurfer</h1>
+        <h1>SolSurfer</h1>
         <h2>Login</h2>
         <input type="password" id="passwordInput" placeholder="Enter password">
         <button onclick="login()">Login</button>
@@ -20,7 +20,7 @@
 
     <div id="mainContent" style="display: none;">
         <div class="container">
-            <h1>> PulseSurfer Fear and Greed Trader</h1>
+            <h1 id="botTitle">> Fear and Greed Trader</h1>
             <p>> By SpuddyA7X</p>
             <div class="chart-section">
                 <div class="chart-container">
@@ -46,7 +46,8 @@
             </div>
             <div class="grid">
                 <div class="card">
-                    <h2>> Trading Parameters<button id="settingsButton" class="gear-button"><i class="fa fa-cog"></i></button></h2>
+                    <h2>> Trading Parameters<button id="settingsButton" class="gear-button"><i
+                                class="fa fa-cog"></i></button></h2>
                     <div id="updateFeedback"></div>
                     <form id="paramForm">
                         <div class="form-header">
@@ -59,52 +60,76 @@
                                 <span>Read-Only Mode</span>
                             </div>
                         </div>
+                    
+                        <!-- Common section header -->
+                        <h3>Sentiment Boundaries</h3>
+                    
+                        <!-- Common parameters (sentiment boundaries) -->
                         <div class="sentiment-row">
                             <div class="sentiment-input">
                                 <label for="extremeGreedBoundary">Extreme Greed Boundary:</label>
-                                <input type="number" id="extremeGreedBoundary" name="extremeGreedBoundary" min="0"
-                                    max="100">
+                                <input type="number" id="extremeGreedBoundary" name="extremeGreedBoundary" min="0" max="100">
                             </div>
-                            <div class="sentiment-input">
-                                <label for="extremeGreedMultiplier">Extreme Greed Multiplier:</label>
-                                <input type="number" id="extremeGreedMultiplier" name="extremeGreedMultiplier" min="0"
-                                    max="1" step="0.0001">
-                            </div>
-                        </div>
-                        <div class="sentiment-row">
                             <div class="sentiment-input">
                                 <label for="greedBoundary">Greed Boundary:</label>
                                 <input type="number" id="greedBoundary" name="greedBoundary" min="0" max="100">
-                            </div>
-                            <div class="sentiment-input">
-                                <label for="greedMultiplier">Greed Multiplier:</label>
-                                <input type="number" id="greedMultiplier" name="greedMultiplier" min="0" max="1"
-                                    step="0.0001">
-                            </div>
-                        </div>
-                        <div class="sentiment-row">
-                            <div class="sentiment-input">
-                                <label for="fearBoundary">Fear Boundary:</label>
-                                <input type="number" id="fearBoundary" name="fearBoundary" min="0" max="100">
-                            </div>
-                            <div class="sentiment-input">
-                                <label for="fearMultiplier">Fear Multiplier:</label>
-                                <input type="number" id="fearMultiplier" name="fearMultiplier" min="0" max="1"
-                                    step="0.0001">
                             </div>
                         </div>
                         <div class="sentiment-row">
                             <div class="sentiment-input">
                                 <label for="extremeFearBoundary">Extreme Fear Boundary:</label>
-                                <input type="number" id="extremeFearBoundary" name="extremeFearBoundary" min="0"
-                                    max="100">
+                                <input type="number" id="extremeFearBoundary" name="extremeFearBoundary" min="0" max="100">
                             </div>
                             <div class="sentiment-input">
-                                <label for="extremeFearMultiplier">Extreme Fear Multiplier:</label>
-                                <input type="number" id="extremeFearMultiplier" name="extremeFearMultiplier" min="0"
-                                    max="1" step="0.0001">
+                                <label for="fearBoundary">Fear Boundary:</label>
+                                <input type="number" id="fearBoundary" name="fearBoundary" min="0" max="100">
                             </div>
                         </div>
+                    
+                        <!-- PulseSurfer specific parameters -->
+                        <div class="pulse-only">
+                            <h3>Sentiment Multipliers</h3>
+                            <div class="sentiment-row">
+                                <div class="sentiment-input">
+                                    <label for="extremeGreedMultiplier">Extreme Greed Multiplier:</label>
+                                    <input type="number" id="extremeGreedMultiplier" name="extremeGreedMultiplier" min="0" max="1"
+                                        step="0.0001">
+                                </div>
+                                <div class="sentiment-input">
+                                    <label for="greedMultiplier">Greed Multiplier:</label>
+                                    <input type="number" id="greedMultiplier" name="greedMultiplier" min="0" max="1" step="0.0001">
+                                </div>
+                            </div>
+                            <div class="sentiment-row">
+                                <div class="sentiment-input">
+                                    <label for="extremeFearMultiplier">Extreme Fear Multiplier:</label>
+                                    <input type="number" id="extremeFearMultiplier" name="extremeFearMultiplier" min="0" max="1"
+                                        step="0.0001">
+                                </div>
+                                <div class="sentiment-input">
+                                    <label for="fearMultiplier">Fear Multiplier:</label>
+                                    <input type="number" id="fearMultiplier" name="fearMultiplier" min="0" max="1" step="0.0001">
+                                </div>
+                            </div>
+                        </div>
+                    
+                        <!-- WaveSurfer specific parameters -->
+                        <div class="wave-only">
+                            <h3>Trade Parameters</h3>
+                            <div class="sentiment-row full-width">
+                                <div class="sentiment-input">
+                                    <label for="streakThreshold">Streak Threshold:</label>
+                                    <input type="number" id="streakThreshold" name="streakThreshold" min="1" step="1">
+                                </div>
+                            </div>
+                            <div class="sentiment-row full-width">
+                                <div class="sentiment-input">
+                                    <label for="tradeMultiplier">Trade Size (% of Selling Balance):</label>
+                                    <input type="number" id="tradeMultiplier" name="tradeMultiplier" min="1" max="100" step="1">
+                                </div>
+                            </div>
+                        </div>
+                    
                         <div class="button-container">
                             <button type="submit">Update Parameters</button>
                         </div>
@@ -115,7 +140,6 @@
                     <div id="timestamp" class="timestamp"></div>
                     <div id="versionNumber" class="version-number"></div>
                     <div id="tradingData" class="trading-data-grid">
-                        <!-- Trading data will be inserted here by JavaScript -->
                     </div>
                 </div>
             </div>
@@ -125,14 +149,13 @@
     <div id="settingsPopup" class="popup-menu">
         <div class="popup-content">
             <button id="closePopupButton" class="close-popup-button">×</button>
-			<h1>Settings</h1>
+            <h1>Settings</h1>
             <div class="button-column">
                 <div class="user-input">
-					<label for="monthlyCost">Montly Cost (USD):</label>
-					<div class="input-container">
-						<input type="number" id="monthlyCost" name="monthlyCost" min="0"
-							max="999" step="0.01">
-					</div>
+                    <label for="monthlyCost">Monthly Cost (USD):</label>
+                    <div class="input-container">
+                        <input type="number" id="monthlyCost" name="monthlyCost" min="0" max="999" step="0.01">
+                    </div>
                 </div>
                 <button type="button" id="restartButton">Restart Trading</button>
             </div>

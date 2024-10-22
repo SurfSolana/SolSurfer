@@ -2,7 +2,7 @@ const Position = require('./Position');
 const { executeSwap, updatePortfolioBalances, USDC, SOL, updatePositionFromSwap, logPositionUpdate } = require('./trading');
 const { fetchFearGreedIndex, getSentiment, fetchPrice, BASE_PRICE_URL } = require('./api');
 const { getTimestamp, formatTime, getWaitTime, logTradingData, getVersion } = require('./utils');
-const { server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState } = require('./server');
+const { server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState } = require('./waveServer');
 const { setWallet, setConnection, getWallet, getConnection } = require('./globalState');
 const cliProgress = require('cli-progress');
 
@@ -16,21 +16,69 @@ let SENTIMENT_MULTIPLIERS;
 let wallet = getWallet();
 let connection = getConnection();
 
+let sentimentStreak = [];
+let STREAK_THRESHOLD = 5; // Configurable, set to 5 as an example
+
 // Create the progress bar
 const progressBar = new cliProgress.SingleBar({
     format: 'Progress |{bar}| {percentage}% | {remainingTime}',
     barCompleteChar: '\u2588',
     barIncompleteChar: '\u2591',
-    hideCursor: true
+    hideCursor: true,
+    stopOnComplete: true,
+    clearOnComplete: true
 });
 
-async function main() {
-    console.log("Entering main function");
-    isCurrentExecutionCancelled = false;
+function cleanupProgressBar() {
     try {
         if (progressBar.isActive) {
             progressBar.stop();
         }
+    } catch (error) {
+        console.error('Error cleaning up progress bar:', error);
+    }
+}
+
+function startProgressBar(totalSeconds) {
+    cleanupProgressBar();
+
+    progressBar.start(totalSeconds, 0, {
+        remainingTime: formatTime(totalSeconds * 1000)
+    });
+
+    let elapsedSeconds = 0;
+    const updateInterval = setInterval(() => {
+        if (!progressBar.isActive || elapsedSeconds >= totalSeconds) {
+            clearInterval(updateInterval);
+            cleanupProgressBar();
+            return;
+        }
+
+        elapsedSeconds++;
+        const remainingSeconds = totalSeconds - elapsedSeconds;
+
+        try {
+            progressBar.update(elapsedSeconds, {
+                remainingTime: formatTime(remainingSeconds * 1000)
+            });
+        } catch (error) {
+            console.error('Error updating progress bar:', error);
+            clearInterval(updateInterval);
+            cleanupProgressBar();
+        }
+    }, 1000);
+
+    return updateInterval;
+}
+
+async function main() {
+    console.log("Entering WaveSurfer main function");
+    isCurrentExecutionCancelled = false;
+    let progressInterval = null;
+
+    try {
+        cleanupProgressBar();
+        clearTimeout(globalTimeoutId);
 
         position.incrementCycle();
 
@@ -55,7 +103,6 @@ async function main() {
         const { solBalance, usdcBalance } = await updatePortfolioBalances(wallet, connection);
         console.log(`Updated balances - SOL: ${solBalance}, USDC: ${usdcBalance}`);
 
-        // Update the position with new balances
         position.updateBalances(solBalance, usdcBalance);
 
         if (isCurrentExecutionCancelled) {
@@ -63,12 +110,17 @@ async function main() {
             return;
         }
 
+        // Update sentiment streak
+        updateSentimentStreak(sentiment);
+
         let swapResult = null;
         let recentTrade = null;
         let txId = null;
 
-        if (!MONITOR_MODE && sentiment !== "NEUTRAL") {
-            swapResult = await executeSwap(wallet, sentiment, USDC, SOL);
+        // Wave trading logic - trade based on sentiment streak
+        if (!MONITOR_MODE && shouldTrade(sentiment)) {
+            const tradeType = sentimentStreak[0] === "EXTREME_FEAR" || sentimentStreak[0] === "FEAR" ? "buy" : "sell";
+            swapResult = await executeSwap(wallet, tradeType, USDC, SOL);
 
             if (isCurrentExecutionCancelled) {
                 console.log("Execution cancelled. Exiting main.");
@@ -77,7 +129,7 @@ async function main() {
 
             if (swapResult) {
                 txId = swapResult.txId;
-                recentTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                recentTrade = updatePositionFromSwap(position, swapResult, tradeType, currentPrice);
                 if (recentTrade) {
                     addRecentTrade(recentTrade);
                     console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);
@@ -85,14 +137,14 @@ async function main() {
                     console.log(`${getTimestamp()}: No trade executed this cycle.`);
                 }
             }
-        }
-        else if (MONITOR_MODE) {
+            // Reset streak after trading
+            sentimentStreak = [];
+        } else if (MONITOR_MODE) {
             console.log("Monitor Mode: Data collected without trading.");
         }
 
         const enhancedStats = position.getEnhancedStatistics(currentPrice);
 
-        // Log enhanced statistics...
         console.log("\n--- Enhanced Trading Statistics ---");
         console.log(`Total Script Runtime: ${enhancedStats.totalRuntime} hours`);
         console.log(`Total Cycles: ${enhancedStats.totalCycles}`);
@@ -102,6 +154,7 @@ async function main() {
         console.log(`Total Volume: ${enhancedStats.totalVolume.sol} SOL / ${enhancedStats.totalVolume.usdc} USDC ($${enhancedStats.totalVolume.usd})`);
         console.log(`Balances: SOL: ${enhancedStats.balances.sol.initial} -> ${enhancedStats.balances.sol.current}, USDC: ${enhancedStats.balances.usdc.initial} -> ${enhancedStats.balances.usdc.current}`);
         console.log(`Average Prices: Entry: $${enhancedStats.averagePrices.entry}, Sell: $${enhancedStats.averagePrices.sell}`);
+        console.log(`Current Sentiment Streak: ${sentimentStreak.join(', ')}`);
         console.log("------------------------------------\n");
 
         console.log(`Jito Bundle ID: ${txId}`);
@@ -124,10 +177,12 @@ async function main() {
             initialSolBalance: position.initialSolBalance,
             initialUsdcBalance: position.initialUsdcBalance,
             startTime: position.startTime,
+            sentimentStreak: sentimentStreak.join(', ')
         };
 
         console.log('Emitting trading data with version:', getVersion());
-        emitTradingData(tradingData);  // Pass tradingData directly, not as an object
+        emitTradingData(tradingData);
+
         saveState({
             position: {
                 solBalance: position.solBalance,
@@ -147,18 +202,77 @@ async function main() {
                 totalVolumeUsdc: position.totalVolumeUsdc
             },
             tradingData,
-            settings: readSettings()
+            settings: readSettings(),
+            sentimentStreak
         });
+
     } catch (error) {
         console.error('Error during main execution:', error);
-        if (progressBar.isActive) {
-            progressBar.stop();
-        }
+        cleanupProgressBar();
     } finally {
         if (!isCurrentExecutionCancelled) {
-            scheduleNextRun();
+            try {
+                const waitTime = getWaitTime();
+                const nextExecutionTime = new Date(Date.now() + waitTime);
+                console.log(`\nNext trading update at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
+
+                const totalSeconds = Math.ceil(waitTime / 1000);
+                progressInterval = startProgressBar(totalSeconds);
+
+                globalTimeoutId = setTimeout(async () => {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                    }
+                    cleanupProgressBar();
+
+                    if (!isCurrentExecutionCancelled) {
+                        await main();
+                    }
+                }, waitTime);
+
+                console.log('Next execution scheduled successfully');
+            } catch (scheduleError) {
+                console.error('Error scheduling next execution:', scheduleError);
+                cleanupProgressBar();
+                // Attempt to recover by scheduling another run in 5 minutes
+                setTimeout(async () => {
+                    if (!isCurrentExecutionCancelled) {
+                        await main();
+                    }
+                }, 300000);
+            }
+        } else {
+            cleanupProgressBar();
         }
     }
+}
+
+function updateSentimentStreak(sentiment) {
+    if (sentiment === "NEUTRAL") {
+        if (sentimentStreak.length >= STREAK_THRESHOLD) {
+            console.log(`Sentiment returned to NEUTRAL after streak of ${sentimentStreak.length} ${sentimentStreak[0]} readings.`);
+        } else {
+            sentimentStreak = [];
+        }
+    } else if (sentimentStreak.length === 0) {
+        sentimentStreak.push(sentiment);
+    } else {
+        const lastSentiment = sentimentStreak[sentimentStreak.length - 1];
+        if ((sentiment === "EXTREME_FEAR" && lastSentiment === "FEAR") ||
+            (sentiment === "FEAR" && lastSentiment === "EXTREME_FEAR") ||
+            (sentiment === "EXTREME_GREED" && lastSentiment === "GREED") ||
+            (sentiment === "GREED" && lastSentiment === "EXTREME_GREED") ||
+            sentiment === lastSentiment) {
+            sentimentStreak.push(sentiment);
+        } else {
+            sentimentStreak = [sentiment];
+        }
+    }
+    console.log(`Current sentiment streak: ${sentimentStreak.join(', ')}`);
+}
+
+function shouldTrade(currentSentiment) {
+    return sentimentStreak.length >= STREAK_THRESHOLD && currentSentiment === "NEUTRAL";
 }
 
 function scheduleNextRun() {
@@ -204,7 +318,6 @@ async function initialize() {
 
     clearTimeout(globalTimeoutId);
 
-
     const savedState = loadState();
     console.log("SaveState :", savedState ? "Found" : "Not found");
 
@@ -233,7 +346,7 @@ async function initialize() {
     });
 
     await fetchPrice(BASE_PRICE_URL, SOL);
-    scheduleNextRun();
+    await main();
 }
 
 async function resetPosition(wallet, connection) {
@@ -265,7 +378,8 @@ async function resetPosition(wallet, connection) {
         initialPortfolioValue: position.getCurrentValue(currentPrice),
         initialSolBalance: solBalance,
         initialUsdcBalance: usdcBalance,
-        startTime: Date.now()
+        startTime: Date.now(),
+        sentimentStreak: [],
     };
 
     setInitialData(initialData);
@@ -310,6 +424,10 @@ function handleParameterUpdate(newParams) {
         SENTIMENT_MULTIPLIERS = updatedSettings.SENTIMENT_MULTIPLIERS;
         console.log('Sentiment multipliers updated. New multipliers:', SENTIMENT_MULTIPLIERS);
     }
+    if (updatedSettings.STREAK_THRESHOLD) {
+        STREAK_THRESHOLD = updatedSettings.STREAK_THRESHOLD;
+        console.log('Streak threshold updated. New threshold:', STREAK_THRESHOLD);
+    }
 
     console.log('Trading strategy will adjust in the next cycle.');
     console.log('----------------------------------\n');
@@ -339,8 +457,9 @@ paramUpdateEmitter.on('restartTrading', async () => {
     await resetPosition(wallet, connection);
     console.log("Position reset. Waiting for next scheduled interval to start trading...");
 
-    // Reset the cancellation flag
+    // Reset the cancellation flag and sentiment streak
     isCurrentExecutionCancelled = false;
+    sentimentStreak = [];
 
     // Calculate the time until the next interval
     const waitTime = getWaitTime();
@@ -377,10 +496,10 @@ paramUpdateEmitter.on('restartTrading', async () => {
 
 (async function () {
     try {
-        console.log("Starting PulseSurfer...");
+        console.log("Starting WaveSurfer...");
         await initialize();
     } catch (error) {
-        console.error("Failed to initialize PulseSurfer:", error);
+        console.error("Failed to initialize WaveSurfer:", error);
         process.exit(1);
     }
 })();

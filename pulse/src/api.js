@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const fetch = require('cross-fetch');
 const { PublicKey } = require('@solana/web3.js');
-const { readSettings } = require('./server');
+const { readSettings } = require('./pulseServer');
 
 const BASE_PRICE_URL = "https://price.jup.ag/v6/price?ids=";
 const BASE_SWAP_URL = "https://quote-api.jup.ag/v6";

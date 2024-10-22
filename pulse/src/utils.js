@@ -7,7 +7,7 @@ const { Wallet } = require('@project-serum/anchor');
 const bs58 = require('bs58');
 const csv = require('csv-writer').createObjectCsvWriter;
 
-const LOG_FILE_PATH = path.join(__dirname, '..', 'user', 'fgi_log.csv');
+const LOG_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'fgi_log.csv');
 
 function getTimestamp() {
     const now = new Date();
@@ -136,7 +136,7 @@ async function logTradingData(timestamp, price, indexValue) {
 
 // Config functions
 function setupEnvFile() {
-    const envPath = path.join(__dirname, '..', 'user', '.env');
+    const envPath = path.join(__dirname, '..', '..', 'user', '.env');
 
     if (!fs.existsSync(envPath)) {
         console.log('.env file not found. Creating a new one...');
@@ -154,7 +154,7 @@ PORT=3000
 }
 
 async function loadEnvironment() {
-    dotenv.config({ path: path.join(__dirname, '..', 'user', '.env') });
+    dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
 
     if (!process.env.PRIVATE_KEY || !process.env.RPC_URL) {
         console.error("Missing required environment variables. Please ensure PRIVATE_KEY and RPC_URL are set in your .env file.");
@@ -179,8 +179,29 @@ async function loadEnvironment() {
 // Version function
 function getVersion() {
     try {
-        const packageJson = require('../package.json');
-        return packageJson.version;
+        const path = require('path');
+        const fs = require('fs');
+
+        // Get the root directory (2 levels up from utils.js in src folder)
+        const rootDir = path.resolve(__dirname, '../..');
+        const packagePath = path.join(rootDir, 'package.json');
+
+        if (fs.existsSync(packagePath)) {
+            const packageData = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+            return packageData.version;
+        }
+
+        // Try one more level up if not found
+        const altRootDir = path.resolve(__dirname, '../../..');
+        const altPackagePath = path.join(altRootDir, 'package.json');
+
+        if (fs.existsSync(altPackagePath)) {
+            const packageData = JSON.parse(fs.readFileSync(altPackagePath, 'utf8'));
+            return packageData.version;
+        }
+
+        console.error('Could not find package.json in', rootDir, 'or', altRootDir);
+        return 'unknown';
     } catch (error) {
         console.error('Error reading package.json:', error);
         return 'unknown';

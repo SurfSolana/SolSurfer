@@ -17,8 +17,8 @@ const { PublicKey } = require('@solana/web3.js');
 
 // Function to check and create necessary files
 function ensureRequiredFiles() {
-  const envPath = path.join(__dirname, '..', 'user', '.env');
-  const settingsPath = path.join(__dirname, '..', 'user', 'settings.json');
+  const envPath = path.join(__dirname, '..', '..', 'user', '.env');
+  const settingsPath = path.join(__dirname, '..', '..', 'user', 'settings.json');
   let filesCreated = false;
 
   if (!fs.existsSync(envPath)) {
@@ -34,21 +34,28 @@ PORT=3000
   }
 
   const DEFAULT_SETTINGS = {
+    // Shared settings between both bots
     SENTIMENT_BOUNDARIES: {
       EXTREME_FEAR: 15,
       FEAR: 35,
       GREED: 65,
       EXTREME_GREED: 85
     },
+    USER_MONTHLY_COST: 0,
+    DEVELOPER_TIP_PERCENTAGE: 0,
+    MONITOR_MODE: false,
+
+    // PulseSurfer specific settings
     SENTIMENT_MULTIPLIERS: {
       EXTREME_FEAR: 0.05,
       FEAR: 0.03,
       GREED: 0.03,
       EXTREME_GREED: 0.05
     },
-	USER_MONTHLY_COST: 0,
-    DEVELOPER_TIP_PERCENTAGE: 0,
-    MONITOR_MODE: false
+
+    // WaveSurfer specific settings
+    STREAK_THRESHOLD: 5,
+    TRADE_MULTIPLIER: 15  // Percentage of balance to trade
   };
 
   if (!fs.existsSync(settingsPath)) {
@@ -67,7 +74,7 @@ PORT=3000
 
 // Function to validate .env contents
 function validateEnvContents() {
-  const requiredEnvVars = ['PRIVATE_KEY', 'RPC_URL', 'ADMIN_PASSWORD'];
+  const requiredEnvVars = ['RPC_URL', 'ADMIN_PASSWORD'];
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
   if (missingVars.length > 0) {
@@ -97,7 +104,7 @@ if (!ensureRequiredFiles()) {
 }
 
 // Load environment variables
-dotenv.config({ path: path.join(__dirname, '..', 'user', '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
 
 // Validate .env contents
 if (!validateEnvContents()) {
@@ -108,8 +115,8 @@ if (!validateEnvContents()) {
 const app = express();
 
 // Settings functionality
-const SETTINGS_PATH = path.join(__dirname, '..', 'user', 'settings.json');
-const STATE_FILE_PATH = path.join(__dirname, '..', 'user', 'saveState.json');
+const SETTINGS_PATH = path.join(__dirname, '..', '..', 'user', 'settings.json');
+const STATE_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'saveState.json');
 
 function readSettings() {
   try {
@@ -328,6 +335,12 @@ function clearRecentTrades() {
 // Socket.io setup
 io.on('connection', (socket) => {
   console.log('\nNew client connected');
+  // Send server identification
+  socket.emit('serverIdentification', {
+    type: 'pulse',
+    name: 'PulseSurfer',
+    version: getVersion()
+  });
   socket.on('disconnect', () => {
     console.log('\nClient disconnected');
   });

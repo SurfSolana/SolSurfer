@@ -21,6 +21,8 @@ let sentimentBoundaries = {
     EXTREME_GREED: 80
 };
 
+let serverType = null;
+let serverName = null;
 let priceUnit = 'usd';
 let lastTradingData;
 
@@ -104,14 +106,15 @@ function authenticatedFetch(url, options = {}) {
 
 function toggleReadOnlyMode() {
     const isReadOnly = readOnlyToggle.checked;
-    inputFields.forEach(input => {
+    // Only target inputs within the parameter form
+    paramForm.querySelectorAll('input').forEach(input => {
         if (input !== readOnlyToggle) {  // Don't disable the toggle itself
             input.disabled = isReadOnly;
         }
     });
     paramForm.querySelector('button[type="submit"]').disabled = isReadOnly;
     document.getElementById('restartButton').disabled = isReadOnly;
-	document.getElementById('settingsButton').disabled = isReadOnly;
+    document.getElementById('settingsButton').disabled = isReadOnly;
 }
 
 function initializeReadOnlyMode() {
@@ -157,6 +160,13 @@ function updateTradingData(data) {
         { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
         { label: "Estimated APY (Compared to Holding 100% SOL)", value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
     ];
+
+    if (serverType === 'wave') {
+        dataPoints.push(
+            { label: "Current Sentiment Streak", value: data.sentimentStreak || 'No streak', icon: "fa-solid fa-trophy" },
+            { label: "Streak Threshold", value: formatValue(data.streakThreshold), icon: "fa-solid fa-bullseye" }
+        );
+    }
 
     tradingDataElement.innerHTML = dataPoints.map(point => `
         <div class="data-item ${point.fullWidth ? 'full-width' : ''}">
@@ -214,7 +224,28 @@ function updateFormValues(params) {
         document.getElementById('greedMultiplier').value = params.SENTIMENT_MULTIPLIERS.GREED;
         document.getElementById('extremeGreedMultiplier').value = params.SENTIMENT_MULTIPLIERS.EXTREME_GREED;
     }
-    document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
+
+    // Handle monthly cost for both bots
+    if (params.USER_MONTHLY_COST !== undefined) {
+        document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
+    }
+
+    // Handle Wave-specific parameters only if they exist
+    if (serverType === 'wave') {
+        if (params.STREAK_THRESHOLD !== undefined) {
+            const streakThreshold = document.getElementById('streakThreshold');
+            if (streakThreshold) {
+                streakThreshold.value = params.STREAK_THRESHOLD;
+            }
+        }
+        if (params.TRADE_MULTIPLIER !== undefined) {
+            const tradeMultiplier = document.getElementById('tradeMultiplier');
+            if (tradeMultiplier) {
+                tradeMultiplier.value = params.TRADE_MULTIPLIER;
+            }
+        }
+    }
+
     updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
 }
 
@@ -334,6 +365,35 @@ socket.on('connect', () => {
     showFeedback('Connected to server', 'success');
 });
 
+socket.on('serverIdentification', (serverInfo) => {
+    console.log('Connected to server:', serverInfo);
+    serverType = serverInfo.type;
+    serverName = serverInfo.name;
+
+    // Update title and header
+    document.title = serverInfo.name;
+    document.querySelector('h1').textContent = `> ${serverInfo.name} Fear and Greed Trader`;
+    document.body.className = serverInfo.type === 'wave' ? 'wave-theme' : 'pulse-theme';
+
+    // Configure UI based on server type
+    if (serverType === 'wave') {
+        // Show Wave-specific elements and hide Pulse elements
+        document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'block');
+        document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'none');
+    } else {
+        // Hide Wave-specific elements and show Pulse elements
+        document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'block');
+    }
+
+    // Update version display with bot identifier
+    const versionElement = document.getElementById('versionNumber');
+    if (versionElement) {
+        const prefix = serverType === 'wave' ? 'Wave v' : 'Pulse v';
+        versionElement.textContent = `${prefix}${serverInfo.version}`;
+    }
+});
+
 socket.on('disconnect', () => {
     console.log('Disconnected from WebSocket');
     showFeedback('Disconnected from server', 'error');
@@ -356,21 +416,19 @@ socket.on('tradingUpdate', (data) => {
     }
 });
 
-paramForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-	updateParams();
-});
+function updateParams(e) {
+    if (e) e.preventDefault();
 
-function updateParams () {
-	 if (readOnlyToggle.checked) {
+    if (readOnlyToggle.checked) {
         showFeedback('Cannot update parameters in read-only mode.', 'error');
         return;
     }
     const formData = new FormData(paramForm);
-	
-	const monthlyCostInput = document.getElementById('monthlyCost');
+
+    const monthlyCostInput = document.getElementById('monthlyCost');
     const monthlyCost = parseFloat(monthlyCostInput.value);
-	
+
+    // Common parameters
     const params = {
         SENTIMENT_BOUNDARIES: {
             EXTREME_FEAR: parseInt(formData.get('extremeFearBoundary')),
@@ -378,14 +436,21 @@ function updateParams () {
             GREED: parseInt(formData.get('greedBoundary')),
             EXTREME_GREED: parseInt(formData.get('extremeGreedBoundary'))
         },
-        SENTIMENT_MULTIPLIERS: {
+        USER_MONTHLY_COST: monthlyCost
+    };
+
+    // Add version-specific parameters
+    if (serverType === 'wave') {
+        params.STREAK_THRESHOLD = parseInt(formData.get('streakThreshold'));
+        params.TRADE_MULTIPLIER = parseFloat(formData.get('tradeMultiplier'));
+    } else {
+        params.SENTIMENT_MULTIPLIERS = {
             EXTREME_FEAR: parseFloat(formData.get('extremeFearMultiplier')),
             FEAR: parseFloat(formData.get('fearMultiplier')),
             GREED: parseFloat(formData.get('greedMultiplier')),
             EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
-        },
-			USER_MONTHLY_COST: monthlyCost
-    };
+        };
+    }
 
     authenticatedFetch('/api/params', {
         method: 'POST',
@@ -405,6 +470,7 @@ function updateParams () {
         });
 }
 
+paramForm.addEventListener('submit', updateParams);
 
 document.getElementById('restartButton').addEventListener('click', function () {
     if (confirm('Are you sure you want to restart trading? This will reset all position data.')) {

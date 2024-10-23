@@ -238,39 +238,6 @@ async function main() {
     }
 }
 
-function scheduleNextRun() {
-    const waitTime = getWaitTime();
-    const nextExecutionTime = new Date(Date.now() + waitTime);
-
-    console.log(`\nNext trading update at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
-
-    const totalSeconds = Math.ceil(waitTime / 1000);
-
-    progressBar.start(totalSeconds, 0, {
-        remainingTime: formatTime(waitTime)
-    });
-
-    let elapsedSeconds = 0;
-    const updateInterval = setInterval(() => {
-        elapsedSeconds++;
-        const remainingSeconds = totalSeconds - elapsedSeconds;
-        progressBar.update(elapsedSeconds, {
-            remainingTime: formatTime(remainingSeconds * 1000)
-        });
-
-        if (elapsedSeconds >= totalSeconds) {
-            clearInterval(updateInterval);
-            progressBar.stop();
-        }
-    }, 1000);
-
-    globalTimeoutId = setTimeout(() => {
-        if (!isCurrentExecutionCancelled) {
-            main();
-        }
-    }, waitTime);
-}
-
 async function initialize() {
     const { loadEnvironment } = require('./utils');
 

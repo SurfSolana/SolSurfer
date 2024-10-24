@@ -1,3 +1,5 @@
+import { createFearGreedChart } from './chart.js';
+
 const socket = io({
     transports: ['websocket'],
     upgrade: false
@@ -11,8 +13,6 @@ const fgiValueElement = document.getElementById('fgiValue');
 const fgiGaugeElement = document.getElementById('fgiGauge');
 const fgiPointerElement = document.getElementById('fgiPointer');
 const tradeListElement = document.getElementById('tradeList');
-const readOnlyToggle = document.getElementById('readOnlyToggle');
-const inputFields = document.querySelectorAll('#paramForm input');
 
 let sentimentBoundaries = {
     EXTREME_FEAR: 20,
@@ -103,26 +103,6 @@ function authenticatedFetch(url, options = {}) {
             return response;
         });
 }
-
-function toggleReadOnlyMode() {
-    const isReadOnly = readOnlyToggle.checked;
-    // Only target inputs within the parameter form
-    paramForm.querySelectorAll('input').forEach(input => {
-        if (input !== readOnlyToggle) {  // Don't disable the toggle itself
-            input.disabled = isReadOnly;
-        }
-    });
-    paramForm.querySelector('button[type="submit"]').disabled = isReadOnly;
-    document.getElementById('restartButton').disabled = isReadOnly;
-    document.getElementById('settingsButton').disabled = isReadOnly;
-}
-
-function initializeReadOnlyMode() {
-    readOnlyToggle.checked = true;
-    toggleReadOnlyMode();
-}
-
-readOnlyToggle.addEventListener('change', toggleReadOnlyMode);
 
 function togglePriceUnit() {
     priceUnit = priceUnit === 'usd' ? 'eur' : 'usd';
@@ -224,11 +204,8 @@ function updateFormValues(params) {
         document.getElementById('greedMultiplier').value = params.SENTIMENT_MULTIPLIERS.GREED;
         document.getElementById('extremeGreedMultiplier').value = params.SENTIMENT_MULTIPLIERS.EXTREME_GREED;
     }
-
-    // Handle monthly cost for both bots
-    if (params.USER_MONTHLY_COST !== undefined) {
-        document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
-    }
+	document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
+	document.getElementById('devTip').value = params.DEVELOPER_TIP_PERCENTAGE;
 
     // Handle Wave-specific parameters only if they exist
     if (serverType === 'wave') {
@@ -245,8 +222,10 @@ function updateFormValues(params) {
             }
         }
     }
-
     updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
+	if (serverType === 'pulse') {
+            createFearGreedChart(params);
+        }
 }
 
 function updateTradeList(trades) {
@@ -380,6 +359,7 @@ socket.on('serverIdentification', (serverInfo) => {
         // Show Wave-specific elements and hide Pulse elements
         document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'block');
         document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'none');
+		document.getElementById('chartContainer').style.display = 'none';
     } else {
         // Hide Wave-specific elements and show Pulse elements
         document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'none');
@@ -418,15 +398,8 @@ socket.on('tradingUpdate', (data) => {
 
 function updateParams(e) {
     if (e) e.preventDefault();
-
-    if (readOnlyToggle.checked) {
-        showFeedback('Cannot update parameters in read-only mode.', 'error');
-        return;
-    }
+	
     const formData = new FormData(paramForm);
-
-    const monthlyCostInput = document.getElementById('monthlyCost');
-    const monthlyCost = parseFloat(monthlyCostInput.value);
 
     // Common parameters
     const params = {
@@ -436,9 +409,7 @@ function updateParams(e) {
             GREED: parseInt(formData.get('greedBoundary')),
             EXTREME_GREED: parseInt(formData.get('extremeGreedBoundary'))
         },
-        USER_MONTHLY_COST: monthlyCost
     };
-
     // Add version-specific parameters
     if (serverType === 'wave') {
         params.STREAK_THRESHOLD = parseInt(formData.get('streakThreshold'));
@@ -451,7 +422,10 @@ function updateParams(e) {
             EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
         };
     }
+	paramsApi(params);
+}
 
+function paramsApi(params) {
     authenticatedFetch('/api/params', {
         method: 'POST',
         headers: {
@@ -463,6 +437,9 @@ function updateParams(e) {
         .then(data => {
             console.log('Server response:', data);
             showFeedback('Parameters updated successfully.', 'success');
+			if (serverType === 'pulse') {
+            createFearGreedChart(params);
+        }
         })
         .catch((error) => {
             console.error('Error:', error);
@@ -497,7 +474,6 @@ function restartTrading() {
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchRecentTrades();
-    initializeReadOnlyMode();
 });
 
 function showFeedback(message, type) {
@@ -537,6 +513,27 @@ document.getElementById('closePopupButton').addEventListener('click', function (
     document.getElementById('mainContent').classList.remove('blur');
     document.body.classList.remove('no-scroll');
 });
+
+document.getElementById('monthlyCostButton').addEventListener('click', function() {
+	const monthlyCostInput = document.getElementById('monthlyCost');
+	const monthlyCost = parseFloat(monthlyCostInput.value);
+	
+	const params = {
+			USER_MONTHLY_COST: monthlyCost,
+    }
+	paramsApi(params);
+});
+
+document.getElementById('devTipButton').addEventListener('click', function() {
+	const devTipInput = document.getElementById('devTip');
+	const devTip = parseFloat(devTipInput.value);
+	
+	const params = {
+			DEVELOPER_TIP_PERCENTAGE: devTip,
+    }
+	paramsApi(params);
+});
+
 
 // Call this function once when the page loads
 document.addEventListener('DOMContentLoaded', addToggleButton);

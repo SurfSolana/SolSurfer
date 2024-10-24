@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -46,20 +46,16 @@
             </div>
             <div class="grid">
                 <div class="card">
-                    <h2>> Trading Parameters<button id="settingsButton" class="gear-button"><i
-                                class="fa fa-cog"></i></button></h2>
-                    <div id="updateFeedback"></div>
+					<div class="header-flex">
+						<h2>> Trading Parameters</h2>
+						<button id="settingsButton" class="gear-button">
+							<i class="fa fa-cog"></i>
+							</button>
+					</div>
+					<div id="chartContainer" style="width: 100%; max-width: 600px; height: auto;">
+						<canvas id="fearGreedChart"></canvas>
+					</div>
                     <form id="paramForm">
-                        <div class="form-header">
-                            <h3>Update Parameters</h3>
-                            <div class="switch-container">
-                                <label class="switch">
-                                    <input type="checkbox" id="readOnlyToggle">
-                                    <span class="slider"></span>
-                                </label>
-                                <span>Read-Only Mode</span>
-                            </div>
-                        </div>
                     
                         <!-- Common section header -->
                         <h3>Sentiment Boundaries</h3>
@@ -132,6 +128,7 @@
                     
                         <div class="button-container">
                             <button type="submit">Update Parameters</button>
+							<div id="updateFeedback"></div>
                         </div>
                     </form>
                 </div>
@@ -151,11 +148,21 @@
             <button id="closePopupButton" class="close-popup-button">×</button>
             <h1>Settings</h1>
             <div class="button-column">
-                <div class="user-input">
-                    <label for="monthlyCost">Monthly Cost (USD):</label>
-                    <div class="input-container">
-                        <input type="number" id="monthlyCost" name="monthlyCost" min="0" max="999" step="0.01">
-                    </div>
+				<div class="user-input">
+					<label for="monthlyCost">Montly Cost (USD):</label>
+					<div class="input-container">
+						<input type="number" id="monthlyCost" name="monthlyCost" min="0"
+							max="999" step="0.01">
+						<button type="button" id="monthlyCostButton" class="monthlyCostButton">Submit</button>
+					</div>
+                </div>
+				<div class="user-input">
+					<label for="devTip">Developer Tip (%):</label>
+					<div class="input-container">
+						<input type="number" id="devTip" name="devTip" min="0"
+							max="2" step="0.01">
+						<button type="button" id="devTipButton" class="devTipButton">Submit</button>
+					</div>
                 </div>
                 <button type="button" id="restartButton">Restart Trading</button>
             </div>
@@ -163,7 +170,9 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+	<script type="module" src="./chart.js"></script>
 </body>
 
 </html>

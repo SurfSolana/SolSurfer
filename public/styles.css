@@ -46,6 +46,10 @@ h1, h2, h3 {
     text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
 }
 
+h2 {
+    margin: 0;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -168,7 +172,7 @@ button:hover {
 
 #updateFeedback {
     margin-top: 10px;
-    padding: 10px;
+    padding: 2px;
     border-radius: 4px;
     text-align: center;
     font-weight: bold;
@@ -326,79 +330,15 @@ button:hover {
     color: var(--secondary);
 }
 
-.form-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-.switch-container {
-    display: flex;
-    align-items: center;
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 60px;
-    height: 34px;
-    margin-right: 10px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--primary);
-    transition: .4s;
-    border-radius: 34px;
-}
-
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 26px;
-    width: 26px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: .4s;
-    border-radius: 50%;
-}
-
-input:checked + .slider {
-    background-color: var(--secondary);
-}
-
-input:checked + .slider:before {
-    transform: translateX(26px);
-}
-
-input:disabled,
-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 .button-container {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     margin-top: 20px;
 }
 
 .button-container button {
     flex: 1;
-    margin: 0 5px;
+    margin: 0 0px;
 }
 
 #restartButton {
@@ -462,7 +402,6 @@ button:disabled {
     color: inherit;
     cursor: pointer;
     font-size: 1.2em;
-    margin-left: 10px;
 }
 
 .popup-menu {
@@ -546,6 +485,49 @@ button:disabled {
     overflow: hidden;
 }
 
+.header-flex {
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* Pushes the button to the right */
+}
+
+.monthlyCostButton {
+	background-color: var(--primary);
+    color: var(--text);
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+	margin-left: 5px;
+}
+
+.monthlyCostButton:hover {
+    background-color: var(--primary-dark);
+}
+
+.devTipButton {
+	background-color: var(--primary);
+    color: var(--text);
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+	margin-left: 5px;
+}
+
+.devTipButton:hover {
+    background-color: var(--primary-dark);
+}
+
+#fearGreedChart {
+    width: 100%;
+    height: auto;
+}
+
 @media (max-width: 768px) {
     body {
         padding: 10px;
@@ -575,15 +557,6 @@ button:disabled {
     .sentiment-input {
         width: 100%;
         margin-bottom: 10px;
-    }
-
-    .form-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .switch-container {
-        margin-top: 10px;
     }
 
     .button-container {

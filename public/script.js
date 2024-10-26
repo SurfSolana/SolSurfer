@@ -117,9 +117,6 @@ function updateTradingData(data) {
     timestampElement.textContent = data.timestamp || 'Please Wait';
 
     const versionElement = document.getElementById('versionNumber');
-    if (versionElement) {
-        versionElement.textContent = data.version ? `v${data.version}` : 'Version: Unknown';
-    }
 
     const formatValue = (value, prefix = '', suffix = '') => {
         if (value === null || value === undefined) return 'Please Wait';
@@ -350,8 +347,11 @@ socket.on('serverIdentification', (serverInfo) => {
     serverName = serverInfo.name;
 
     // Update title and header
-    document.title = serverInfo.name;
-    document.querySelector('h1').textContent = `> ${serverInfo.name} Fear and Greed Trader`;
+    document.title = `${serverName} v${serverInfo.version}`;
+    const headerElement = document.querySelector('#botTitle');
+    if (headerElement) {
+        headerElement.textContent = `> ${serverName} Fear and Greed Trader`;
+    }
     document.body.className = serverInfo.type === 'wave' ? 'wave-theme' : 'pulse-theme';
 
     // Configure UI based on server type
@@ -359,7 +359,7 @@ socket.on('serverIdentification', (serverInfo) => {
         // Show Wave-specific elements and hide Pulse elements
         document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'block');
         document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'none');
-		document.getElementById('chartContainer').style.display = 'none';
+        document.getElementById('chartContainer').style.display = 'none';
     } else {
         // Hide Wave-specific elements and show Pulse elements
         document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'none');

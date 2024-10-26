@@ -177,7 +177,8 @@ async function main() {
             initialSolBalance: position.initialSolBalance,
             initialUsdcBalance: position.initialUsdcBalance,
             startTime: position.startTime,
-            sentimentStreak: sentimentStreak.join(', ')
+            sentimentStreak: sentimentStreak.join(', '),
+            streakThreshold: STREAK_THRESHOLD
         };
 
         console.log('Emitting trading data with version:', getVersion());

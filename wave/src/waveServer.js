@@ -492,10 +492,10 @@ function getLatestTradingData() {
 
 function emitTradingData(data) {
     console.log('Server emitting trading data with version:', data.version);
-    const days = getRunTimeInDays(data.startTime);
-    const hours = Math.floor((days % 1) * 24);
-    const minutes = Math.floor(((days % 1) * 24 % 1) * 60);
+    const runTimeMs = Date.now() - data.startTime;
+    const programRunTime = formatTime(runTimeMs);
 
+    const days = getRunTimeInDays(data.startTime);
     const estimatedAPY = calculateAPY(data.initialPortfolioValue, data.portfolioValue, days);
 
     const emitData = {
@@ -532,7 +532,7 @@ function emitTradingData(data) {
             usdc: parseFloat(((data.usdcBalance / data.portfolioValue) * 100).toFixed(2)),
             sol: parseFloat(((data.solBalance * data.price / data.portfolioValue) * 100).toFixed(2))
         },
-        programRunTime: `${Math.floor(days)}:${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`,
+        programRunTime,
         portfolioTotalChange: parseFloat(((data.portfolioValue - data.initialPortfolioValue) / data.initialPortfolioValue * 100).toFixed(2)),
         solanaMarketChange: parseFloat(((data.price - data.initialSolPrice) / data.initialSolPrice * 100).toFixed(2)),
         estimatedAPY: estimatedAPY,
@@ -565,9 +565,15 @@ function emitTradingData(data) {
 
 function formatTime(milliseconds) {
     const totalSeconds = Math.floor(milliseconds / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
+    const days = Math.floor(totalSeconds / (24 * 3600));
+    const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
+
+    // Format with days if present, otherwise just show HH:MM:SS
+    if (days > 0) {
+        return `${days}d ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 

@@ -383,14 +383,29 @@ socket.on('tradingUpdate', (data) => {
     updateTradingData(data);
     console.log('Client received trading update with version:', data.version);
     console.log('Received trading update:', data);
+
     if (data.recentTrades && data.recentTrades.length > 0) {
         const mostRecentTrade = data.recentTrades[0];
         console.log('Most recent trade:', mostRecentTrade);
 
-        const tradeToAdd = mostRecentTrade;
+        // Get all current trades in the list
+        const currentTradeList = document.querySelector('#tradeList');
+        const existingTrades = currentTradeList?.querySelectorAll('li a');
 
-        console.log('Trade to add:', tradeToAdd);
-        addTrade(tradeToAdd);
+        // Check if this is a duplicate trade by comparing transaction URLs with all existing trades
+        let isDuplicate = false;
+        if (existingTrades && mostRecentTrade.txUrl) {
+            isDuplicate = Array.from(existingTrades).some(trade => trade.href === mostRecentTrade.txUrl);
+            if (isDuplicate) {
+                console.log('Duplicate trade detected (matching txUrl in list), skipping addition');
+            }
+        }
+
+        // Only add the trade if it's not a duplicate
+        if (!isDuplicate) {
+            console.log('Trade to add:', mostRecentTrade);
+            addTrade(mostRecentTrade);
+        }
     } else {
         console.log('No recent trades in the update');
     }

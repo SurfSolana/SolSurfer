@@ -60,7 +60,9 @@ async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 5, retryDelay = 50
         try {
             const response = await axios.get(`${BASE_PRICE_URL}${tokenId}`);
             const price = response.data.data[tokenId].price;
-            console.log(`Current Sol Price: ${price}`);
+            if (price && !isNaN(price)) {
+                console.log(`Current Sol Price: ${price}`);
+            }
             return parseFloat(price.toFixed(2));
         } catch (error) {
             console.error(`Error fetching price (attempt ${attempt}/${maxRetries}):`, error.message);

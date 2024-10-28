@@ -7,6 +7,8 @@ const bs58 = require('bs58');
 const WebSocket = require('ws');
 const fetch = require('cross-fetch');
 
+let isBundleCancelled = false;
+
 const USDC = {
     ADDRESS: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     DECIMALS: 6,
@@ -33,6 +35,10 @@ const TIP_ACCOUNTS = [
 ];
 
 const maxJitoTip = 0.0004;
+
+function cancelPendingBundle() {
+    isBundleCancelled = true;
+}
 
 async function executeSwap(wallet, sentiment, USDC, SOL) {
     try {
@@ -287,10 +293,16 @@ async function jitoTipCheck() {
 
 async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
     let currentAttempt = 1;
+    isBundleCancelled = false; // Reset at start of new bundle
 
-    while (currentAttempt <= maxAttempts) {
+    while (currentAttempt <= maxAttempts && !isBundleCancelled) {
         try {
             console.log(`\nAttempt ${currentAttempt}/${maxAttempts} to send Jito bundle...`);
+
+            if (isBundleCancelled) {
+                console.log('Bundle cancelled, abandoning transaction...');
+                return null;
+            }
 
             // Deserialize the base transaction
             const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
@@ -303,6 +315,11 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
             );
 
             console.log(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
+
+            if (isBundleCancelled) {
+                console.log('Bundle cancelled after tip calculation, abandoning transaction...');
+                return null;
+            }
 
             // Always get a fresh blockhash for each attempt
             const { blockhash, lastValidBlockHeight } = await wallet.connection.getLatestBlockhash("confirmed");
@@ -334,11 +351,21 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
 
             const bundleToSend = [transaction, txSub];
 
+            if (isBundleCancelled) {
+                console.log('Bundle cancelled before sending, abandoning transaction...');
+                return null;
+            }
+
             console.log(`Sending bundle for attempt ${currentAttempt} with blockhash: ${blockhash}`);
             const jitoBundleResult = await sendJitoBundle(bundleToSend);
 
             const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
             const tipTxSignature = bs58.default.encode(txSub.signatures[0]);
+
+            if (isBundleCancelled) {
+                console.log('Bundle cancelled before confirmation, abandoning transaction...');
+                return null;
+            }
 
             console.log(`\nWaiting for bundle confirmation on attempt ${currentAttempt}...`);
             const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
@@ -363,11 +390,20 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
                 }
             }
         } catch (error) {
+            if (isBundleCancelled) {
+                console.log('Bundle cancelled during error handling, abandoning retry attempts...');
+                return null;
+            }
             console.error(`\nError in bundle attempt ${currentAttempt}:`, error.message);
             if (currentAttempt === maxAttempts) {
                 console.log(`All ${maxAttempts} attempts exhausted. Giving up.`);
                 return null;
             }
+        }
+
+        if (isBundleCancelled) {
+            console.log('Bundle cancelled before retry, abandoning transaction...');
+            return null;
         }
 
         currentAttempt++;
@@ -385,9 +421,14 @@ async function waitForBundleConfirmation(bundleId) {
     let retries = 0;
     const maxRetries = 45; // Will check for about 90 seconds total
 
-    while (retries < maxRetries) {
+    while (retries < maxRetries && !isBundleCancelled) {
         try {
             const status = await getInFlightBundleStatus(bundleId);
+
+            if (isBundleCancelled) {
+                console.log('Bundle confirmation cancelled by user');
+                return { status: "Failed", reason: "Bundle cancelled by user" };
+            }
 
             if (status === null) {
                 console.log("Bundle not found. Continuing to wait...");
@@ -404,6 +445,10 @@ async function waitForBundleConfirmation(bundleId) {
 
         await new Promise(resolve => setTimeout(resolve, checkInterval));
         retries++;
+    }
+
+    if (isBundleCancelled) {
+        return { status: "Failed", reason: "Bundle cancelled by user" };
     }
 
     return { status: "Failed", reason: "Bundle did not land or fail within expected time" };
@@ -551,6 +596,7 @@ module.exports = {
     getTokenBalance,
     resetPosition,
     handleJitoBundle,
+    cancelPendingBundle,
     USDC,
     SOL
 };

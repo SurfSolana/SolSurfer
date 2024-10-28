@@ -408,6 +408,9 @@ paramUpdateEmitter.on('restartTrading', async () => {
     wallet = getWallet();
     connection = getConnection();
 
+    // Cancel any pending Jito bundles
+    cancelPendingBundle();
+
     // Signal the current execution to stop
     isCurrentExecutionCancelled = true;
 
@@ -419,15 +422,17 @@ paramUpdateEmitter.on('restartTrading', async () => {
         progressBar.stop();
     }
 
-    // Wait a bit to ensure the current execution has a chance to exit
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait a bit to ensure the current execution and any pending bundles have a chance to exit
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     await resetPosition(wallet, connection);
     console.log("Position reset. Waiting for next scheduled interval to start trading...");
 
     // Reset the cancellation flag and sentiment streak
     isCurrentExecutionCancelled = false;
-    sentimentStreak = [];
+    if (typeof sentimentStreak !== 'undefined') {
+        sentimentStreak = [];
+    }
 
     // Calculate the time until the next interval
     const waitTime = getWaitTime();

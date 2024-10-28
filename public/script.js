@@ -189,12 +189,6 @@ function updateSentimentBoundaries(newBoundaries) {
 }
 
 function updateFormValues(params) {
-    if (params.SENTIMENT_BOUNDARIES) {
-        document.getElementById('extremeFearBoundary').value = params.SENTIMENT_BOUNDARIES.EXTREME_FEAR;
-        document.getElementById('fearBoundary').value = params.SENTIMENT_BOUNDARIES.FEAR;
-        document.getElementById('greedBoundary').value = params.SENTIMENT_BOUNDARIES.GREED;
-        document.getElementById('extremeGreedBoundary').value = params.SENTIMENT_BOUNDARIES.EXTREME_GREED;
-    }
     if (params.SENTIMENT_MULTIPLIERS) {
         document.getElementById('extremeFearMultiplier').value = params.SENTIMENT_MULTIPLIERS.EXTREME_FEAR;
         document.getElementById('fearMultiplier').value = params.SENTIMENT_MULTIPLIERS.FEAR;
@@ -219,10 +213,11 @@ function updateFormValues(params) {
             }
         }
     }
-    updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
+	updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
 	if (serverType === 'pulse') {
             createFearGreedChart(params);
         }
+	initializeSlider(params);
 }
 
 function updateTradeList(trades) {
@@ -411,33 +406,38 @@ socket.on('tradingUpdate', (data) => {
     }
 });
 
-function updateParams(e) {
-    if (e) e.preventDefault();
+function updateParams(e, sliderBoundaries) {
+
+    if (e && typeof e.preventDefault === 'function') {
+        e.preventDefault();
+    }
+	
+	if (!sliderBoundaries) {
+        sliderBoundaries = sentimentBoundaries;
+    }
 	
     const formData = new FormData(paramForm);
 
     // Common parameters
     const params = {
-        SENTIMENT_BOUNDARIES: {
-            EXTREME_FEAR: parseInt(formData.get('extremeFearBoundary')),
-            FEAR: parseInt(formData.get('fearBoundary')),
-            GREED: parseInt(formData.get('greedBoundary')),
-            EXTREME_GREED: parseInt(formData.get('extremeGreedBoundary'))
-        },
+        SENTIMENT_BOUNDARIES: sliderBoundaries,
+		SENTIMENT_MULTIPLIERS: {}
     };
+	
+	params.SENTIMENT_MULTIPLIERS = {
+        EXTREME_FEAR: parseFloat(formData.get('extremeFearMultiplier')),
+        FEAR: parseFloat(formData.get('fearMultiplier')),
+        GREED: parseFloat(formData.get('greedMultiplier')),
+        EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
+    };
+	
     // Add version-specific parameters
     if (serverType === 'wave') {
         params.STREAK_THRESHOLD = parseInt(formData.get('streakThreshold'));
         params.TRADE_MULTIPLIER = parseFloat(formData.get('tradeMultiplier'));
-    } else {
-        params.SENTIMENT_MULTIPLIERS = {
-            EXTREME_FEAR: parseFloat(formData.get('extremeFearMultiplier')),
-            FEAR: parseFloat(formData.get('fearMultiplier')),
-            GREED: parseFloat(formData.get('greedMultiplier')),
-            EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
-        };
     }
 	paramsApi(params);
+	updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
 }
 
 function paramsApi(params) {
@@ -461,8 +461,6 @@ function paramsApi(params) {
             showFeedback('Error updating parameters. Please try again.', 'error');
         });
 }
-
-paramForm.addEventListener('submit', updateParams);
 
 document.getElementById('restartButton').addEventListener('click', function () {
     if (confirm('Are you sure you want to restart trading? This will reset all position data.')) {
@@ -512,19 +510,16 @@ function addToggleButton() {
     }
 }
 
-// Show the Settings menu when the gear icon is clicked
 document.getElementById('settingsButton').addEventListener('click', function () {
     document.getElementById('settingsPopup').style.display = 'block';
-    
-    // Blur the main content and disable scrolling
+   
     document.getElementById('mainContent').classList.add('blur');
     document.body.classList.add('no-scroll');
 });
 
 document.getElementById('closePopupButton').addEventListener('click', function () {
     document.getElementById('settingsPopup').style.display = 'none';
-    
-    // Remove the blur and re-enable scrolling
+
     document.getElementById('mainContent').classList.remove('blur');
     document.body.classList.remove('no-scroll');
 });
@@ -549,6 +544,115 @@ document.getElementById('devTipButton').addEventListener('click', function() {
 	paramsApi(params);
 });
 
+function attachInputListeners() {
+    const numberInputs = document.querySelectorAll('#paramForm input[type="number"]');
+
+    numberInputs.forEach(input => {
+        input.addEventListener('change', updateParams);
+    });
+}
+
+function initializeSlider(params) {
+    const slider = document.getElementById('slider');
+
+    const startValues = [
+        params.SENTIMENT_BOUNDARIES?.EXTREME_FEAR ?? 20,
+        params.SENTIMENT_BOUNDARIES?.FEAR ?? 40,
+        params.SENTIMENT_BOUNDARIES?.GREED ?? 60,
+        params.SENTIMENT_BOUNDARIES?.EXTREME_GREED ?? 80
+    ];
+
+    const buttonLabels = [
+        'Extreme Fear', // For 0
+        'Fear',         // For 1
+        'Greed',        // For 2
+        'Extreme Greed' // For 3
+    ];
+
+    noUiSlider.create(slider, {
+        start: startValues,
+        connect: [true, true, false, true, true],
+        margin: 5,
+        padding: 5,
+        range: {
+            'min': 0,
+            'max': 100
+        },
+        step: 1,
+        tooltips: true,
+        pips: {
+            mode: 'values',
+            values: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+            density: 10,
+            stepped: true,
+        }
+    });
+
+    updateTooltips(slider, startValues, buttonLabels);
+
+    slider.noUiSlider.on('update', function (values, handle) {
+        updateTooltips(slider, values, buttonLabels);
+        mergeTooltips(slider, 10, buttonLabels);
+    });
+
+    slider.noUiSlider.on('change', function (values) {
+        const sliderBoundaries = {
+            EXTREME_FEAR: Math.round(values[0]),
+            FEAR: Math.round(values[1]),
+            GREED: Math.round(values[2]),
+            EXTREME_GREED: Math.round(values[3])
+        };
+        console.log('Slider Boundaries:', sliderBoundaries);
+        updateParams(null, sliderBoundaries);
+    });
+}
+
+function updateTooltips(slider, values, buttonLabels) {
+    const tooltips = slider.noUiSlider.getTooltips();
+    tooltips.forEach((tooltip, index) => {
+        if (tooltip) {
+            const value = Math.round(values[index]);
+            tooltip.innerHTML = `${buttonLabels[index]}<br>${value}`;
+        }
+    });
+}
+
+function mergeTooltips(slider, threshold = 10, buttonLabels) { 
+    const tooltips = slider.noUiSlider.getTooltips();
+    const values = slider.noUiSlider.get();
+
+    tooltips.forEach((tooltip, index) => {
+        if (!tooltip) return;
+
+        const currentValue = Math.round(values[index]);
+
+        if (index > 0) {
+            const position = parseFloat(values[index]);
+            const previousPosition = parseFloat(values[index - 1]);
+
+            if (position - previousPosition < threshold) {
+                tooltip.style.display = 'none';
+                const combinedTooltip = tooltips[index - 1];
+                combinedTooltip.innerHTML = 
+                    `<div style="display: flex; justify-content: space-between;">
+                        <div>${buttonLabels[index - 1]}<br>${Math.round(values[index - 1])}</div>
+                        <div>&nbsp;-&nbsp;</div>
+                        <div>${buttonLabels[index]}<br>${currentValue}</div>
+                    </div>`;
+                combinedTooltip.classList.add('merged');
+            } else {
+                tooltip.style.display = 'block';
+                tooltip.innerHTML = `${buttonLabels[index]}<br>${currentValue}`;
+                tooltip.classList.remove('merged');
+            }
+        } else {
+            tooltip.style.display = 'block'; 
+            tooltip.innerHTML = `${buttonLabels[index]}<br>${currentValue}`;
+            tooltip.classList.remove('merged');
+        }
+    });
+}
 
 // Call this function once when the page loads
 document.addEventListener('DOMContentLoaded', addToggleButton);
+document.addEventListener('DOMContentLoaded', attachInputListeners);

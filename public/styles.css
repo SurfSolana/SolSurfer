@@ -528,6 +528,65 @@ button:hover {
     height: auto;
 }
 
+.slider {
+    margin: 70px auto 50px;
+    width: 90%;
+}
+
+.boundarySlider-labels div {
+    text-align: center;
+	font-size: 16px;
+}
+
+.noUi-target {
+    background-color: var(--background) !important;
+}
+
+.noUi-connect {
+    background-color: var(--primary-dark) !important;
+}
+
+.noUi-handle {
+    background-color: var(--background) !important;
+    border: 2px solid var(--primary-dark) !important;
+}
+
+.noUi-tooltip {
+    background-color: var(--background) !important;
+    color: var(--secondary) !important;
+	font-size: 10px !important;
+	border-radius: 4px !important;
+    border: 2px solid var(--secondary) !important;
+    border-width: 1px !important;
+	padding: 2px 2px !important;
+    width: auto !important;
+	position: absolute;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.noUi-tooltip.merged {
+    transform: translate(calc(-50% + 22px)) !important;
+}
+
+.noUi-value {
+    color: var(--secondary) !important;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.noUi-marker-large {
+    background-color: var(--secondary) !important;
+    height: 6px;
+    width: 1px;
+}
+
+.tooltip-container {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+}
+	
 @media (max-width: 768px) {
     body {
         padding: 10px;

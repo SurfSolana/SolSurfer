@@ -32,7 +32,6 @@ const TIP_ACCOUNTS = [
     "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
 ];
 
-const BUNDLE_CONFIRMATION_TIMEOUT = 90 * 1000;
 const maxJitoTip = 0.0004;
 
 async function executeSwap(wallet, sentiment, USDC, SOL) {
@@ -57,11 +56,12 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         );
 
         if (!swapTransaction) {
-            throw new Error("Failed to get swap transaction");
+            console.log("Failed to get swap transaction");
+            return null;
         }
 
-        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount);
-        if (jitoBundleResult === null) {
+        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction);
+        if (!jitoBundleResult) {
             console.log("Jito bundle failed after all attempts.");
             return null;
         }
@@ -120,7 +120,7 @@ async function updatePortfolioBalances(wallet, connection) {
 
 function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
     if (!swapResult) {
-        console.log("No swap executed. Position remains unchanged.");
+        console.log("No swap executed or swap failed. Position remains unchanged.");
         return null;
     }
 
@@ -291,14 +291,18 @@ async function jitoTipCheck() {
     });
 }
 
-async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) {
-    const startTime = Date.now();
+async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
+    let currentAttempt = 1;
 
-    while (Date.now() - startTime < totalTimeout) {
+    while (currentAttempt <= maxAttempts) {
         try {
+            console.log(`\nAttempt ${currentAttempt}/${maxAttempts} to send Jito bundle...`);
+
+            // Deserialize the base transaction
             const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
             const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
+            // Get Jito tip amount
             const tipValueInSol = await jitoTipCheck();
             const limitedTipValueInLamports = Math.floor(
                 Math.min(tipValueInSol, maxJitoTip) * 1_000_000_000 * 1.1
@@ -306,6 +310,11 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
 
             console.log(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
 
+            // Always get a fresh blockhash for each attempt
+            const { blockhash, lastValidBlockHeight } = await wallet.connection.getLatestBlockhash("confirmed");
+            console.log(`\nNew Blockhash for attempt ${currentAttempt}: ${blockhash}`);
+
+            // Create tip transaction with new blockhash
             const tipAccount = new PublicKey(getRandomTipAccount());
             const tipIxn = SystemProgram.transfer({
                 fromPubkey: wallet.publicKey,
@@ -313,20 +322,17 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
                 lamports: limitedTipValueInLamports
             });
 
-            // Get a new blockhash for each attempt
-            const resp = await wallet.connection.getLatestBlockhash("confirmed");
-            console.log("New Blockhash:", resp.blockhash);
-
-            // Update the blockhash in the swap transaction
-            transaction.message.recentBlockhash = resp.blockhash;
-
+            // Create tip transaction message with new blockhash
             const messageSub = new TransactionMessage({
                 payerKey: wallet.publicKey,
-                recentBlockhash: resp.blockhash,
+                recentBlockhash: blockhash,
                 instructions: [tipIxn]
             }).compileToV0Message();
 
             const txSub = new VersionedTransaction(messageSub);
+
+            // Update swap transaction with new blockhash
+            transaction.message.recentBlockhash = blockhash;
 
             // Re-sign both transactions with the new blockhash
             txSub.sign([wallet.payer]);
@@ -334,44 +340,58 @@ async function handleJitoBundle(wallet, swapTransaction, totalTimeout = 300000) 
 
             const bundleToSend = [transaction, txSub];
 
+            console.log(`Sending bundle for attempt ${currentAttempt} with blockhash: ${blockhash}`);
             const jitoBundleResult = await sendJitoBundle(bundleToSend);
 
             const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
             const tipTxSignature = bs58.default.encode(txSub.signatures[0]);
 
-            const confirmationResult = await waitForBundleConfirmation(jitoBundleResult, BUNDLE_CONFIRMATION_TIMEOUT);
+            console.log(`\nWaiting for bundle confirmation on attempt ${currentAttempt}...`);
+            const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
 
             if (confirmationResult.status === "Landed") {
-                console.log("Bundle landed successfully");
+                console.log(`Bundle landed successfully on attempt ${currentAttempt}`);
                 return {
                     jitoBundleResult,
                     swapTxSignature,
                     tipTxSignature,
-                    ...confirmationResult
+                    ...confirmationResult,
+                    attempts: currentAttempt,
+                    finalBlockhash: blockhash
                 };
             } else if (confirmationResult.status === "Failed") {
-                console.log("Bundle failed. Retrying with a new blockhash.");
-                continue;
-            } else {
-                console.log("Bundle status inconclusive. Retrying with a new blockhash.");
-                continue;
+                console.log(`\nBundle failed on attempt ${currentAttempt}. Reason: ${confirmationResult.reason}`);
+                console.log(`Failed blockhash was: ${blockhash}`);
+
+                if (currentAttempt === maxAttempts) {
+                    console.log(`All ${maxAttempts} attempts exhausted. Giving up.`);
+                    return null;
+                }
             }
         } catch (error) {
-            console.log(`Error in bundle handling: ${error.message}. Retrying with a new blockhash.`);
+            console.error(`\nError in bundle attempt ${currentAttempt}:`, error.message);
+            if (currentAttempt === maxAttempts) {
+                console.log(`All ${maxAttempts} attempts exhausted. Giving up.`);
+                return null;
+            }
         }
 
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        currentAttempt++;
+        if (currentAttempt <= maxAttempts) {
+            console.log(`\nWaiting 5 seconds before retry ${currentAttempt}...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
     }
 
-    console.log(`Exceeded total timeout for bundle attempts. Total time: ${Date.now() - startTime}ms`);
     return null;
 }
 
-async function waitForBundleConfirmation(bundleId, timeoutMs) {
-    const startTime = Date.now();
-    const checkInterval = 2000;
+async function waitForBundleConfirmation(bundleId) {
+    const checkInterval = 2000; // Check every 2 seconds
+    let retries = 0;
+    const maxRetries = 45; // Will check for about 90 seconds total
 
-    while (Date.now() - startTime < timeoutMs) {
+    while (retries < maxRetries) {
         try {
             const status = await getInFlightBundleStatus(bundleId);
 
@@ -389,9 +409,10 @@ async function waitForBundleConfirmation(bundleId, timeoutMs) {
         }
 
         await new Promise(resolve => setTimeout(resolve, checkInterval));
+        retries++;
     }
 
-    return { status: "Timeout", reason: "Confirmation timeout reached" };
+    return { status: "Failed", reason: "Bundle did not land or fail within expected time" };
 }
 
 async function getInFlightBundleStatus(bundleId) {

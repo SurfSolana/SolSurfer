@@ -133,11 +133,11 @@ async function main() {
                 if (recentTrade) {
                     addRecentTrade(recentTrade);
                     console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);
-                } else {
-                    console.log(`${getTimestamp()}: No trade executed this cycle.`);
                 }
+            } else {
+                console.log(`${getTimestamp()}: Trade execution failed - no swap performed`);
             }
-            // Reset streak after trading
+            // Reset streak after attempting trade, regardless of success
             sentimentStreak = [];
         } else if (MONITOR_MODE) {
             console.log("Monitor Mode: Data collected without trading.");

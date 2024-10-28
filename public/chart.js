@@ -1,8 +1,8 @@
 let fearGreedChart;
+
 export function createFearGreedChart(params) {
-	
-    if (!params || !params.SENTIMENT_MULTIPLIERS || !params.SENTIMENT_BOUNDARIES) {
-        console.error('Invalid parameters provided to createFearGreedChart.');
+    if (!params) {
+        console.error('Invalid parameters provided to createFearGreedChart: params is undefined.');
         return;
     }
 	
@@ -38,7 +38,6 @@ const boundaryPoints = [
         type: 'scatter',
         data: {
 			datasets: [
-            // Dataset to draw the greed to extreme greed line with no dots and tooltips
             {
                 data: [
                     { x: params.SENTIMENT_BOUNDARIES.GREED, y: params.SENTIMENT_MULTIPLIERS.GREED },          // Start at greed
@@ -52,7 +51,7 @@ const boundaryPoints = [
                 showLine: true,
                 fill: true
             },
-            // Dataset to draw the fear to extreme fear line with no dots and tooltips
+
             {
                 data: [
                     { x: params.SENTIMENT_BOUNDARIES.FEAR, y: params.SENTIMENT_MULTIPLIERS.FEAR },          // Start at fear
@@ -66,7 +65,7 @@ const boundaryPoints = [
                 showLine: true,
                 fill: true
             },
-            // Dataset to show dots and tooltips ONLY for the key points (greed, extreme greed, fear, extreme fear)
+			
             {
                 data: [
                     { x: params.SENTIMENT_BOUNDARIES.EXTREME_FEAR, y: params.SENTIMENT_MULTIPLIERS.EXTREME_FEAR }, // Extreme fear
@@ -77,24 +76,28 @@ const boundaryPoints = [
 				    backgroundColor: function(context) {
                     const point = context.dataIndex;
                     if (point === 0 || point === 1) {
-                        return 'rgba(255, 99, 132, 1)'; // Red color for Fear points (Extreme Fear, Fear)
+                        return 'rgba(255, 99, 132, 1)';
                     }
                     if (point === 2 || point === 3) {
-                        return 'rgba(20, 241, 149, 1)'; // Green color for Greed points (Greed, Extreme Greed)
+                        return 'rgba(20, 241, 149, 1)';
                     }
-                    return 'rgba(0, 0, 0, 1)'; // Default color if needed
+                    return 'rgba(0, 0, 0, 1)';
                 },
                 borderColor: 'transparent',
-                pointRadius: 3, // Show dots
-                pointHoverRadius: 6,
+                pointRadius: 4,
+                pointHoverRadius: 7,
                 showLine: false,
                 fill: false
             }
         ]
     },
         options: {
-			responsive: true, // Make the chart responsive
-            maintainAspectRatio: true, // Maintain aspect ratio based on the canvas size
+			animation: {
+				duration: 200,
+				easing: 'easeInOutQuad'
+			},
+			responsive: true,
+            maintainAspectRatio: true,
             scales: {
                 x: {
                     type: 'linear',
@@ -120,21 +123,30 @@ const boundaryPoints = [
             },
             plugins: {
 			legend: {
-                display: false, // Hide the legend
+                display: false,
             },
             tooltip: {
+				enabled: true,
+				intersect: true,
                 callbacks: {
                     label: function(context) {
-                        // Hide tooltip for x = 0 and x = 100
                         if (context.parsed.x === 0 || context.parsed.x === 100) {
-                            return ''; // Return an empty string to hide tooltip
+                            return '';
                         }
-                        return `FGI: ${context.parsed.x}, Multiplier: ${context.parsed.y.toFixed(3)}`; // Show tooltip for other points
+						
+						 const pointLabels = {
+							0: 'Extreme Fear',
+							1: 'Fear',
+							2: 'Greed',
+							3: 'Extreme Greed'
+						};
+						const label = pointLabels[context.dataIndex] || '';
+                        return `${label}`;
                     }
                 }
-            }
-        }
-    }
+            },
+		},
+	},
 });
     
 }

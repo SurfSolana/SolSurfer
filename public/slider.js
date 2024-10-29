@@ -1,6 +1,7 @@
 import { updateParams } from './script.js';
+import { isLocked } from './script.js';
 
-export function initializeSlider(params, serverType) {
+export function initializeSlider(params, serverType, isLocked) {
     const slider = document.getElementById('slider');
 	
 	    if (slider.noUiSlider) {
@@ -56,6 +57,8 @@ export function initializeSlider(params, serverType) {
     });
 
     updateTooltips(slider, startValues, buttonLabels);
+	
+	updateSliderBehavior(slider, isLocked);
 
     slider.noUiSlider.on('update', function (values, handle) {
         updateTooltips(slider, values, buttonLabels);
@@ -76,6 +79,35 @@ export function initializeSlider(params, serverType) {
         console.log('Slider Boundaries:', sliderBoundaries);
         updateParams(null, sliderBoundaries);
     });
+}
+
+export function updateSliderBehavior(slider, isLocked) {
+    try {
+        // Log the inputs for debugging
+        console.log('Updating slider behavior...');
+        console.log('Slider:', slider);
+        console.log('Is Locked:', isLocked);
+
+        // Check if the slider object has the expected method
+        if (!slider.noUiSlider || typeof slider.noUiSlider.updateOptions !== 'function') {
+            throw new Error('Slider object does not have the expected noUiSlider methods.');
+        }
+
+        // Set the slider behavior based on the isLocked state
+        if (isLocked) {
+            console.log('Locking slider...');
+			slider.style.setProperty('pointer-events', 'none', 'important');  
+        } else {
+            console.log('Unlocking slider...');
+			slider.style.setProperty('pointer-events', 'auto', 'important'); 
+        }
+
+        console.log('Slider behavior updated successfully.');
+
+    } catch (error) {
+        // Log any errors to the console
+        console.error('Error updating slider behavior:', error.message);
+    }
 }
 
 function updateTooltips(slider, values, buttonLabels) {

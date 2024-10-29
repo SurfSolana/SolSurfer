@@ -45,7 +45,7 @@
                 </div>
             </div>
             <div class="grid">
-                <div class="card">
+				<div class="card">
 					<div class="header-flex">
 						<h2>> Trading Parameters</h2>
 						<button id="settingsButton" class="gear-button">
@@ -56,13 +56,10 @@
 						<canvas id="fearGreedChart"></canvas>
 					</div>
                     <form id="paramForm">
-                    
-                        <!-- Common section header -->
-                        <h3>> Sentiment Boundaries</h3>
 						<div id="slider" class="slider"></div>
                         <!-- PulseSurfer specific parameters -->
                         <div class="pulse-only">
-                            <h3>> Sentiment Multipliers</h3>
+                            <h3></h3>
                             <div class="sentiment-row">
                                 <div class="sentiment-input">
                                     <label for="extremeGreedMultiplier">Extreme Greed Multiplier:</label>
@@ -89,26 +86,26 @@
                     
                         <!-- WaveSurfer specific parameters -->
                         <div class="wave-only">
-                            <h3>> Trade Parameters</h3>
+                            <h3></h3>
                             <div class="sentiment-row full-width">
                                 <div class="sentiment-input">
                                     <label for="streakThreshold">Streak Threshold:</label>
                                     <input type="number" id="streakThreshold" name="streakThreshold" min="1" step="1">
                                 </div>
                             </div>
-                            <div class="sentiment-row full-width">
-                                <div class="sentiment-input">
-                                    <label for="tradeMultiplier">Trade Size (% of Selling Balance):</label>
-                                    <input type="number" id="tradeMultiplier" name="tradeMultiplier" min="1" max="100" step="1">
-                                </div>
-                            </div>
-                        </div>
-                    
-                        <div class="button-container">
+							<div class="sentiment-row full-width">
+								<div class="sentiment-input">
+									<label for="tradeMultiplier">Trade Size(%):</label>
+									<input type="number" id="tradeMultiplier" name="tradeMultiplier" min="1" max="100" step="1">
+								</div>
+							</div>
+						</div>
+						
+						<div class="button-container">
 							<div id="updateFeedback"></div>
-                        </div>
+                        </div>  
                     </form>
-                </div>
+				</div>
                 <div class="card">
                     <h2>> Current Trading Data</h2>
                     <div id="timestamp" class="timestamp"></div>
@@ -150,6 +147,7 @@
     <script type="module" src="script.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<script type="module" src="./chart.js"></script>
+	<script type="module" src="./slider.js"></script>
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.css" rel="stylesheet">
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.js"></script>
 </body>

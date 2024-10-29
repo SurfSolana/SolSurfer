@@ -84,7 +84,7 @@ async function main() {
 
         const fearGreedIndex = await fetchFearGreedIndex();
         const sentiment = getSentiment(fearGreedIndex);
-        currentPrice = await fetchPrice(BASE_PRICE_URL, SOL);
+        currentPrice = await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
         const timestamp = getTimestamp();
 
         await logTradingData(timestamp, currentPrice, fearGreedIndex);
@@ -313,7 +313,7 @@ async function initialize() {
         console.log(`\nLocal Server Running On: http://localhost:${PORT}`);
     });
 
-    await fetchPrice(BASE_PRICE_URL, SOL);
+    await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
     await main();
 }
 
@@ -327,7 +327,7 @@ async function resetPosition(wallet, connection) {
     }
 
     const { solBalance, usdcBalance } = await updatePortfolioBalances(wallet, connection);
-    const currentPrice = await fetchPrice(BASE_PRICE_URL, SOL);
+    const currentPrice = await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
     position = new Position(solBalance, usdcBalance, currentPrice);
 
     const fearGreedIndex = await fetchFearGreedIndex();

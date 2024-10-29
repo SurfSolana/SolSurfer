@@ -1,5 +1,6 @@
 import { createFearGreedChart } from './chart.js';
 import { initializeSlider } from './slider.js';
+import { updateSliderBehavior } from './slider.js';
 
 const socket = io({
     transports: ['websocket'],
@@ -26,6 +27,7 @@ let serverType = null;
 let serverName = null;
 let priceUnit = 'usd';
 let lastTradingData;
+export let isLocked = true;
 
 function showLoginForm() {
     document.getElementById('loginForm').style.display = 'block';
@@ -218,7 +220,8 @@ function updateFormValues(params) {
 	if (serverType === 'pulse') {
             createFearGreedChart(params);
         }
-	initializeSlider(params, serverType);
+	initializeLockButton();
+	initializeSlider(params, serverType, isLocked);
 }
 
 function updateTradeList(trades) {
@@ -551,6 +554,46 @@ function attachInputListeners() {
     numberInputs.forEach(input => {
         input.addEventListener('change', updateParams);
     });
+}
+
+function toggleLockedState(isLocked) {
+    const paramForm = document.getElementById("paramForm");
+    Array.from(paramForm.elements).forEach(element => {
+        if (isLocked) {
+            element.classList.add("locked");
+            element.setAttribute("readonly", true);
+        } else {
+            element.classList.remove("locked");
+            element.removeAttribute("readonly");
+        }
+    });
+}
+
+function initializeLockButton() {
+    const lockToggleButton = document.getElementById("lockToggleButton");
+	const lockIcon = document.getElementById("lockIcon");
+
+    // Set initial lock state based on isLocked
+    toggleLockedState(isLocked);
+    updateLockIcon(lockIcon, isLocked);
+	
+    // Toggle lock state on button click
+    lockToggleButton.addEventListener("click", function () {
+        isLocked = !isLocked;
+		updateLockIcon(lockIcon, isLocked);
+        toggleLockedState(isLocked);
+		updateSliderBehavior(slider, isLocked);
+    });
+}
+
+function updateLockIcon(lockIcon, isLocked) {
+    if (isLocked) {
+        lockIcon.classList.remove("fa-lock-open"); // Remove the open lock icon
+        lockIcon.classList.add("fa-lock"); // Add the closed lock icon
+    } else {
+        lockIcon.classList.remove("fa-lock"); // Remove the closed lock icon
+        lockIcon.classList.add("fa-lock-open"); // Add the open lock icon
+    }
 }
 
 // Call this function once when the page loads

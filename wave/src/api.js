@@ -4,7 +4,7 @@ const fetch = require('cross-fetch');
 const { PublicKey } = require('@solana/web3.js');
 const { readSettings } = require('./waveServer');
 
-const BASE_PRICE_URL = "https://price.jup.ag/v6/price?ids=";
+const BASE_PRICE_URL = "https://api.jup.ag/price/v2?ids=";
 const BASE_SWAP_URL = "https://quote-api.jup.ag/v6";
 
 async function fetchFearGreedIndex() {
@@ -54,17 +54,31 @@ function getSentiment(data) {
 }
 
 async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 5, retryDelay = 5000) {
-    const tokenId = 'So11111111111111111111111111111111111111112';
+	
+	    if (!BASE_PRICE_URL || !TOKEN) {
+        throw new Error('BASE_PRICE_URL and TOKEN are required');
+    }
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const response = await axios.get(`${BASE_PRICE_URL}${tokenId}`);
-            const price = response.data.data[tokenId].price;
-            if (price && !isNaN(price)) {
-                console.log(`Current Sol Price: ${price}`);
+            const response = await axios.get(`${BASE_PRICE_URL}${TOKEN}`);
+			
+			if (!response.data?.data?.[TOKEN]) {
+                throw new Error('Invalid response structure');
             }
+			
+            const priceData = response.data.data[TOKEN];
+			const price = parseFloat(priceData.price);
+			
+			if (!price || isNaN(price)) {
+				throw new Error('Invalid price value received');
+			}
+			
+			console.log(`Current ${TOKEN.slice(0, 8)}... Price: $${price.toFixed(2)}`);
+			
             return parseFloat(price.toFixed(2));
-        } catch (error) {
+			
+			} catch (error) {
             console.error(`Error fetching price (attempt ${attempt}/${maxRetries}):`, error.message);
 
             if (attempt === maxRetries) {

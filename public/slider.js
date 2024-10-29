@@ -2,6 +2,10 @@ import { updateParams } from './script.js';
 
 export function initializeSlider(params, serverType) {
     const slider = document.getElementById('slider');
+	
+	    if (slider.noUiSlider) {
+        slider.noUiSlider.destroy();
+    }
 
      let startValues, buttonLabels;
     

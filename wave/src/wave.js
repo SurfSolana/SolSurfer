@@ -119,8 +119,9 @@ async function main() {
 
         // Wave trading logic - trade based on sentiment streak
         if (!MONITOR_MODE && shouldTrade(sentiment)) {
-            const tradeType = sentimentStreak[0] === "EXTREME_FEAR" || sentimentStreak[0] === "FEAR" ? "buy" : "sell";
-            swapResult = await executeSwap(wallet, tradeType, USDC, SOL);
+            // Determine the trade sentiment based on the streak
+            const tradeSentiment = sentimentStreak[0]; // Use the first sentiment in the streak
+            swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
 
             if (isCurrentExecutionCancelled) {
                 console.log("Execution cancelled. Exiting main.");
@@ -129,7 +130,7 @@ async function main() {
 
             if (swapResult) {
                 txId = swapResult.txId;
-                recentTrade = updatePositionFromSwap(position, swapResult, tradeType, currentPrice);
+                recentTrade = updatePositionFromSwap(position, swapResult, tradeSentiment, currentPrice);
                 if (recentTrade) {
                     addRecentTrade(recentTrade);
                     console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);

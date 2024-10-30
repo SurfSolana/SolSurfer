@@ -42,12 +42,19 @@ function cancelPendingBundle() {
 
 async function executeSwap(wallet, sentiment, USDC, SOL) {
     try {
-        console.log("Initiating swap");
+        console.log("Initiating swap with sentiment:", sentiment);
 
         const isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
+        console.log("Trade direction:", isBuying ? "BUY" : "SELL");
+
         const inputMint = isBuying ? USDC.ADDRESS : SOL.ADDRESS;
         const outputMint = isBuying ? SOL.ADDRESS : USDC.ADDRESS;
         const balance = isBuying ? wallet.usdcBalance : wallet.solBalance;
+
+        // Add additional logging
+        console.log("Input mint:", inputMint);
+        console.log("Output mint:", outputMint);
+        console.log("Available balance:", balance);
 
         const tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
         console.log(`Trading ${tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))} ${isBuying ? 'USDC' : 'SOL'} for ${isBuying ? 'SOL' : 'USDC'}`);

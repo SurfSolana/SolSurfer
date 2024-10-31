@@ -333,6 +333,7 @@ button:hover {
 
 .button-container {
     display: flex;
+	align-items: center;
     flex-direction: column;
     margin-top: 20px;
 }
@@ -489,7 +490,11 @@ button:hover {
 .header-flex {
     display: flex;
     align-items: center;
-    justify-content: space-between; /* Pushes the button to the right */
+    width: 100%; /* Ensure the header-flex takes the full width of its parent */
+}
+
+.spacer {
+    flex-grow: 1; /* This will take up any available space */
 }
 
 .monthlyCostButton {
@@ -586,6 +591,29 @@ button:hover {
     display: flex;
     justify-content: space-between;
     width: 100%;
+}
+
+.lock-toggle-button {
+    background: none;  /* No background */
+    border: none;      /* No border */
+    cursor: pointer;   /* Pointer on hover */
+    padding: 5px;      /* Adjust padding for clickable area */
+    margin-right: 10px; /* Space between buttons */
+}
+
+.lock-toggle-button i {
+    font-size: 24px; /* Adjust icon size */
+    color: white;    /* Set icon color to white */
+    transition: color 0.3s; /* Smooth transition for color */
+}
+
+.lock-toggle-button.locked i {
+    color: grey; /* Color for locked state */
+}
+
+input.locked {
+    background-color: rgba(240, 240, 240, 0.3); /* Light background to show it's inactive */
+    pointer-events: none;       /* Prevents mouse events */
 }
 	
 @media (max-width: 768px) {

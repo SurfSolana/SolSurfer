@@ -36,6 +36,55 @@ const TIP_ACCOUNTS = [
 
 const maxJitoTip = 0.0004;
 
+function logTradeToFile(tradeData) {
+    const {
+        inputToken,
+        inputAmount,
+        outputToken,
+        outputAmount,
+        jitoStatus,
+        timestamp = new Date().toISOString(),
+        additionalInfo = {}
+    } = tradeData;
+
+    // Format the log entry
+    const logEntry = {
+        timestamp,
+        inputToken,
+        inputAmount: parseFloat(inputAmount).toFixed(6),
+        outputToken,
+        outputAmount: parseFloat(outputAmount).toFixed(6),
+        jitoStatus,
+        ...additionalInfo
+    };
+
+    // Convert to CSV format
+    const csvLine = `${logEntry.timestamp},${logEntry.inputToken},${logEntry.inputAmount},${logEntry.outputToken},${logEntry.outputAmount},${logEntry.jitoStatus}\n`;
+
+    // Ensure logs directory exists
+    const logsDir = path.join(process.cwd(), 'logs');
+    if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir);
+    }
+
+    // Create filename based on current date
+    const date = new Date();
+    const fileName = `trades_${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}.csv`;
+    const filePath = path.join(logsDir, fileName);
+
+    // Create headers if file doesn't exist
+    if (!fs.existsSync(filePath)) {
+        const headers = 'Timestamp,Input Token,Input Amount,Output Token,Output Amount,Jito Status\n';
+        fs.writeFileSync(filePath, headers);
+    }
+
+    // Append the log entry
+    fs.appendFileSync(filePath, csvLine);
+
+    // Also log to console
+    console.log('Trade logged:', logEntry);
+}
+
 function cancelPendingBundle() {
     isBundleCancelled = true;
 }
@@ -49,10 +98,25 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         const outputMint = isBuying ? SOL.ADDRESS : USDC.ADDRESS;
         const balance = isBuying ? wallet.usdcBalance : wallet.solBalance;
 
+        // Log trade attempt
+        const initialLogData = {
+            inputToken: isBuying ? 'USDC' : 'SOL',
+            inputAmount: tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS)),
+            outputToken: isBuying ? 'SOL' : 'USDC',
+            outputAmount: 0, // Will be updated after quote
+            jitoStatus: 'Attempted',
+            timestamp: new Date().toISOString()
+        };
         const tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
+
+        
         console.log(`Trading ${tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))} ${isBuying ? 'USDC' : 'SOL'} for ${isBuying ? 'SOL' : 'USDC'}`);
 
         const quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
+
+        if (quoteResponse) {
+            initialLogData.outputAmount = quoteResponse.outAmount / (10 ** (isBuying ? SOL.DECIMALS : USDC.DECIMALS));
+        }
 
         const swapTransaction = await getFeeAccountAndSwapTransaction(
             new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
@@ -67,6 +131,18 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         }
 
         const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction);
+
+        // Update log data with final status
+        initialLogData.jitoStatus = jitoBundleResult ? 'Success' : 'Failed';
+        if (jitoBundleResult) {
+            initialLogData.additionalInfo = {
+                txId: jitoBundleResult.swapTxSignature,
+                attempts: jitoBundleResult.attempts
+            };
+        }
+
+        logTradeToFile(initialLogData);
+
         if (!jitoBundleResult) {
             console.log("Jito bundle failed after all attempts.");
             return null;
@@ -88,6 +164,16 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         };
 
     } catch (error) {
+        // Log error case
+        logTradeToFile({
+            inputToken: isBuying ? 'USDC' : 'SOL',
+            inputAmount: tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS)),
+            outputToken: isBuying ? 'SOL' : 'USDC',
+            outputAmount: 0,
+            jitoStatus: `Failed - ${error.message}`,
+            timestamp: new Date().toISOString()
+        });
+        
         console.error(`Error during swap:`, error);
         return null;
     }

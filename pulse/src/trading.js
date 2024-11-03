@@ -6,6 +6,8 @@ const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
 const WebSocket = require('ws');
 const fetch = require('cross-fetch');
+const fs = require('fs');
+const path = require('path');
 
 let isBundleCancelled = false;
 
@@ -37,52 +39,53 @@ const TIP_ACCOUNTS = [
 const maxJitoTip = 0.0004;
 
 function logTradeToFile(tradeData) {
-    const {
-        inputToken,
-        inputAmount,
-        outputToken,
-        outputAmount,
-        jitoStatus,
-        timestamp = new Date().toISOString(),
-        additionalInfo = {}
-    } = tradeData;
+    try {
+        // Get only the essential trade data with default values to prevent undefined
+        const {
+            inputToken = '',
+            outputToken = '',
+            inputAmount = 0,
+            outputAmount = 0,
+            jitoStatus = 'Unknown'
+        } = tradeData || {};
 
-    // Format the log entry
-    const logEntry = {
-        timestamp,
-        inputToken,
-        inputAmount: parseFloat(inputAmount).toFixed(6),
-        outputToken,
-        outputAmount: parseFloat(outputAmount).toFixed(6),
-        jitoStatus,
-        ...additionalInfo
-    };
+        // Create timestamp
+        const now = new Date();
+        const timestamp = now.toISOString().replace('T', ' ').slice(0, 19); // Format: YYYY-MM-DD HH:MM:SS
 
-    // Convert to CSV format
-    const csvLine = `${logEntry.timestamp},${logEntry.inputToken},${logEntry.inputAmount},${logEntry.outputToken},${logEntry.outputAmount},${logEntry.jitoStatus}\n`;
+        // Create CSV line with timestamp
+        const csvLine = `${timestamp},${inputToken},${outputToken},${inputAmount},${outputAmount},${jitoStatus}\n`;
 
-    // Ensure logs directory exists
-    const logsDir = path.join(process.cwd(), 'logs');
-    if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir);
+        // Get user folder path (two levels up from src directory)
+        const userFolder = path.join(__dirname, '..', '..', 'user');
+
+        // Create user folder if it doesn't exist
+        if (!fs.existsSync(userFolder)) {
+            fs.mkdirSync(userFolder, { recursive: true });
+        }
+
+        // Create filename with current date
+        const fileName = `Pulse Log ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.csv`;
+        const filePath = path.join(userFolder, fileName);
+
+        // Create headers if file doesn't exist
+        if (!fs.existsSync(filePath)) {
+            const headers = 'Timestamp,Input Token,Output Token,Input Amount,Output Amount,Jito Status\n';
+            fs.writeFileSync(filePath, headers);
+        }
+
+        // Append the trade data
+        fs.appendFileSync(filePath, csvLine);
+        console.log('Successfully logged trade data');
+
+    } catch (error) {
+        console.error('Error logging trade:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code
+        });
     }
-
-    // Create filename based on current date
-    const date = new Date();
-    const fileName = `trades_${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}.csv`;
-    const filePath = path.join(logsDir, fileName);
-
-    // Create headers if file doesn't exist
-    if (!fs.existsSync(filePath)) {
-        const headers = 'Timestamp,Input Token,Input Amount,Output Token,Output Amount,Jito Status\n';
-        fs.writeFileSync(filePath, headers);
-    }
-
-    // Append the log entry
-    fs.appendFileSync(filePath, csvLine);
-
-    // Also log to console
-    console.log('Trade logged:', logEntry);
 }
 
 function cancelPendingBundle() {
@@ -98,27 +101,19 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         const outputMint = isBuying ? SOL.ADDRESS : USDC.ADDRESS;
         const balance = isBuying ? wallet.usdcBalance : wallet.solBalance;
 
-        // Log trade attempt
-        const initialLogData = {
-            inputToken: isBuying ? 'USDC' : 'SOL',
-            inputAmount: tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS)),
-            outputToken: isBuying ? 'SOL' : 'USDC',
-            outputAmount: 0, // Will be updated after quote
-            jitoStatus: 'Attempted',
-            timestamp: new Date().toISOString()
-        };
         const tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
 
-        
-        console.log(`Trading ${tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))} ${isBuying ? 'USDC' : 'SOL'} for ${isBuying ? 'SOL' : 'USDC'}`);
-
-        const quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
-
-        if (quoteResponse) {
-            initialLogData.outputAmount = quoteResponse.outAmount / (10 ** (isBuying ? SOL.DECIMALS : USDC.DECIMALS));
+        if (!tradeAmount || tradeAmount <= 0) {
+            throw new Error(`Invalid trade amount calculated: ${tradeAmount}`);
         }
 
-        const swapTransaction = await getFeeAccountAndSwapTransaction(
+        // Get initial quote
+        let quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
+        if (!quoteResponse) {
+            throw new Error('Failed to get initial quote response');
+        }
+
+        let swapTransaction = await getFeeAccountAndSwapTransaction(
             new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
             new PublicKey(inputMint),
             quoteResponse,
@@ -126,34 +121,31 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         );
 
         if (!swapTransaction) {
-            console.log("Failed to get swap transaction");
-            return null;
+            throw new Error('Failed to create swap transaction');
         }
 
-        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction);
+        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse);
 
-        // Update log data with final status
-        initialLogData.jitoStatus = jitoBundleResult ? 'Success' : 'Failed';
-        if (jitoBundleResult) {
-            initialLogData.additionalInfo = {
-                txId: jitoBundleResult.swapTxSignature,
-                attempts: jitoBundleResult.attempts
-            };
-        }
+        // Calculate final amounts for successful trade
+        const inputAmount = tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS));
+        const outputAmount = jitoBundleResult.finalQuote.outAmount / (10 ** (isBuying ? SOL.DECIMALS : USDC.DECIMALS));
 
-        logTradeToFile(initialLogData);
+        // Log the trade outcome
+        logTradeToFile({
+            inputToken: isBuying ? 'USDC' : 'SOL',
+            outputToken: isBuying ? 'SOL' : 'USDC',
+            inputAmount: inputAmount.toFixed(6),
+            outputAmount: outputAmount.toFixed(6),
+            jitoStatus: jitoBundleResult ? 'Success' : 'Failed'
+        });
 
         if (!jitoBundleResult) {
-            console.log("Jito bundle failed after all attempts.");
-            return null;
+            throw new Error('Jito bundle failed after all attempts');
         }
 
-        // Calculate the actual amounts traded
-        const solChange = isBuying ? quoteResponse.outAmount / (10 ** SOL.DECIMALS) : -tradeAmount / (10 ** SOL.DECIMALS);
-        const usdcChange = isBuying ? -tradeAmount / (10 ** USDC.DECIMALS) : quoteResponse.outAmount / (10 ** USDC.DECIMALS);
+        const solChange = isBuying ? jitoBundleResult.finalQuote.outAmount / (10 ** SOL.DECIMALS) : -tradeAmount / (10 ** SOL.DECIMALS);
+        const usdcChange = isBuying ? -tradeAmount / (10 ** USDC.DECIMALS) : jitoBundleResult.finalQuote.outAmount / (10 ** USDC.DECIMALS);
         const price = Math.abs(usdcChange / solChange);
-
-        console.log('Swap executed:', { solChange, usdcChange, price });
 
         return {
             txId: jitoBundleResult.swapTxSignature,
@@ -164,26 +156,41 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         };
 
     } catch (error) {
-        // Log error case
-        logTradeToFile({
-            inputToken: isBuying ? 'USDC' : 'SOL',
-            inputAmount: tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS)),
-            outputToken: isBuying ? 'SOL' : 'USDC',
-            outputAmount: 0,
-            jitoStatus: `Failed - ${error.message}`,
-            timestamp: new Date().toISOString()
-        });
-        
-        console.error(`Error during swap:`, error);
-        return null;
+        // Log failed trade
+        if (tradeAmount) {
+            logTradeToFile({
+                inputToken: isBuying ? 'USDC' : 'SOL',
+                outputToken: isBuying ? 'SOL' : 'USDC',
+                inputAmount: (tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))).toFixed(6),
+                outputAmount: '0',
+                jitoStatus: 'Failed'
+            });
+        }
+
+        throw error;
     }
 }
 
 function calculateTradeAmount(balance, sentiment, tokenInfo) {
-    const { SENTIMENT_MULTIPLIERS } = readSettings();
-    const sentimentMultiplier = SENTIMENT_MULTIPLIERS[sentiment] || 0;
-    const rawAmount = balance * sentimentMultiplier;
-    return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
+    try {
+        const { SENTIMENT_MULTIPLIERS } = readSettings();
+        if (!SENTIMENT_MULTIPLIERS || !SENTIMENT_MULTIPLIERS[sentiment]) {
+            console.error(`Invalid sentiment multiplier for sentiment: ${sentiment}`);
+            return 0;
+        }
+
+        const sentimentMultiplier = SENTIMENT_MULTIPLIERS[sentiment];
+        if (!balance || balance <= 0) {
+            console.error(`Invalid balance: ${balance}`);
+            return 0;
+        }
+
+        const rawAmount = balance * sentimentMultiplier;
+        return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
+    } catch (error) {
+        console.error('Error calculating trade amount:', error);
+        return 0;
+    }
 }
 
 async function updatePortfolioBalances(wallet, connection) {
@@ -377,9 +384,9 @@ async function jitoTipCheck() {
     });
 }
 
-async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
+async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, maxAttempts = 5) {
     let currentAttempt = 1;
-    isBundleCancelled = false; // Reset at start of new bundle
+    isBundleCancelled = false;
 
     while (currentAttempt <= maxAttempts && !isBundleCancelled) {
         try {
@@ -390,7 +397,28 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
                 return null;
             }
 
-            // Deserialize the base transaction
+            // Get a new quote for each attempt
+            const quoteResponse = currentAttempt === 1 ? initialQuote :
+                await getQuote(inputMint, outputMint, tradeAmount);
+
+            if (!quoteResponse) {
+                throw new Error(`Failed to get quote on attempt ${currentAttempt}`);
+            }
+
+            // Get new swap transaction with updated quote
+            const swapTransaction = currentAttempt === 1 ? initialSwapTransaction :
+                await getFeeAccountAndSwapTransaction(
+                    new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
+                    new PublicKey(inputMint),
+                    quoteResponse,
+                    wallet
+                );
+
+            if (!swapTransaction) {
+                throw new Error(`Failed to create swap transaction on attempt ${currentAttempt}`);
+            }
+
+            // Deserialize the transaction
             const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
             const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
@@ -407,7 +435,7 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
                 return null;
             }
 
-            // Always get a fresh blockhash for each attempt
+            // Get fresh blockhash for each attempt
             const { blockhash, lastValidBlockHeight } = await wallet.connection.getLatestBlockhash("confirmed");
             console.log(`\nNew Blockhash for attempt ${currentAttempt}: ${blockhash}`);
 
@@ -419,7 +447,6 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
                 lamports: limitedTipValueInLamports
             });
 
-            // Create tip transaction message with new blockhash
             const messageSub = new TransactionMessage({
                 payerKey: wallet.publicKey,
                 recentBlockhash: blockhash,
@@ -431,7 +458,7 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
             // Update swap transaction with new blockhash
             transaction.message.recentBlockhash = blockhash;
 
-            // Re-sign both transactions with the new blockhash
+            // Re-sign both transactions
             txSub.sign([wallet.payer]);
             transaction.sign([wallet.payer]);
 
@@ -462,6 +489,7 @@ async function handleJitoBundle(wallet, swapTransaction, maxAttempts = 5) {
                     jitoBundleResult,
                     swapTxSignature,
                     tipTxSignature,
+                    finalQuote: quoteResponse,
                     ...confirmationResult,
                     attempts: currentAttempt,
                     finalBlockhash: blockhash
@@ -675,6 +703,7 @@ async function sendJitoBundle(bundletoSend) {
 
 module.exports = {
     executeSwap,
+    logTradeToFile,
     calculateTradeAmount,
     updatePortfolioBalances,
     updatePositionFromSwap,

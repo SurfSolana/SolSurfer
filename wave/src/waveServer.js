@@ -485,7 +485,11 @@ function getLatestTradingData() {
         recentTrades: recentTrades,
         monitorMode: getMonitorMode(),
         sentimentStreak: initialData.sentimentStreak || '',
-        streakThreshold: initialData.STREAK_THRESHOLD,
+        streakThreshold: initialData.streakThreshold,
+        streakStats: {
+            averageLength: initialData.streakStats?.averageLength || 'N/A',
+            totalStreaks: initialData.streakStats?.totalStreaks || 0
+        },
         tradeMultiplier: tradingParams.TRADE_MULTIPLIER
     };
 }
@@ -550,9 +554,12 @@ function emitTradingData(data) {
             solBalance: parseFloat(data.initialSolBalance.toFixed(6)),
             usdcBalance: parseFloat(data.initialUsdcBalance.toFixed(2))
         },
-        sentimentStreak: data.sentimentStreak || '',
-        streakThreshold: tradingParams.STREAK_THRESHOLD,
-        tradeMultiplier: tradingParams.TRADE_MULTIPLIER
+        sentimentStreak: data.sentimentStreak || 'No streak',
+        streakThreshold: data.streakThreshold,
+        streakStats: {
+            averageLength: data.streakStats?.averageLength || 'N/A',
+            totalStreaks: data.streakStats?.totalStreaks || 0
+        }
     };
 
     console.log('Emitting trading data:', emitData);
@@ -582,7 +589,8 @@ module.exports = {
     io,
     paramUpdateEmitter,
     setInitialData: (data) => {
-        initialData = data;
+        console.log('Setting initial data with streak stats:', data.streakStats); // Debug log
+        initialData = { ...data };
     },
     addRecentTrade,
     emitTradingData,

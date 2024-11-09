@@ -115,50 +115,92 @@ function togglePriceUnit() {
 function updateTradingData(data) {
     lastTradingData = data;
     const priceLabel = priceUnit === 'usd' ? '$' : '€';
-    const price = priceUnit === 'usd' ? data.price.usd : data.price.eur;
+    const price = priceUnit === 'usd' ? data?.price?.usd : data?.price?.eur;
 
-    timestampElement.textContent = data.timestamp || 'Please Wait';
-
-    const versionElement = document.getElementById('versionNumber');
+    timestampElement.textContent = data?.timestamp || 'Please Wait';
 
     const formatValue = (value, prefix = '', suffix = '') => {
         if (value === null || value === undefined) return 'Please Wait';
         if (value === 'N/A') return 'Please Wait';
+
+        // Handle array or object values
+        if (typeof value === 'object') {
+            if (Array.isArray(value)) {
+                return value.join(', ');
+            }
+            // For streakStats or other objects, check if we need to access specific properties
+            if (value.fgi !== undefined) {
+                return value.fgi.toString();
+            }
+            // For other objects, return N/A to avoid [object Object]
+            return 'N/A';
+        }
+
         return `${prefix}${value}${suffix}`;
     };
 
-    const dataPoints = [
-        { label: "Portfolio Value", value: formatValue(data.portfolioValue[priceUnit], priceLabel), icon: "fa-solid fa-wallet" },
-        { label: "Portfolio Total Change", value: formatValue(data.portfolioTotalChange, '', '%'), icon: "fa-solid fa-percentage" },
-        { label: "SOL Price", value: formatValue(price, priceLabel), icon: "fa-solid fa-coins" },
-        { label: "Solana Market Change", value: formatValue(data.solanaMarketChange, '', '%'), icon: "fa-solid fa-percentage" },
-        { label: "Portfolio Weighting", value: data.portfolioWeighting ? `${data.portfolioWeighting.usdc}% USDC, ${data.portfolioWeighting.sol}% SOL` : 'Please Wait', icon: "fa-solid fa-chart-pie", fullWidth: true },
-        { label: "SOL Balance", value: formatValue(data.solBalance, '', ' SOL'), icon: "fa-solid fa-coins" },
-        { label: "USDC Balance", value: formatValue(data.usdcBalance, '', ' USDC'), icon: "fa-solid fa-credit-card" },
-        { label: "Average Entry Price", value: formatValue(data.averageEntryPrice[priceUnit], priceLabel), icon: "fa-solid fa-sign-in-alt" },
-        { label: "Average Sell Price", value: formatValue(data.averageSellPrice[priceUnit], priceLabel), icon: "fa-solid fa-sign-out-alt" },
-        { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
-        { label: "Estimated APY (Compared to Holding 100% SOL)", value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
-    ];
+    const dataPoints = [];
 
-    if (serverType === 'wave') {
+    // Only add points if we have valid data
+    if (data) {
         dataPoints.push(
-            { label: "Current Sentiment Streak", value: data.sentimentStreak || 'No streak', icon: "fa-solid fa-trophy" },
-            { label: "Streak Threshold", value: formatValue(data.streakThreshold), icon: "fa-solid fa-bullseye" }
+            { label: "Portfolio Value", value: formatValue(data.portfolioValue?.[priceUnit], priceLabel), icon: "fa-solid fa-wallet" },
+            { label: "Portfolio Total Change", value: formatValue(data.portfolioTotalChange, '', '%'), icon: "fa-solid fa-percentage" },
+            { label: "SOL Price", value: formatValue(price, priceLabel), icon: "fa-solid fa-coins" },
+            { label: "Solana Market Change", value: formatValue(data.solanaMarketChange, '', '%'), icon: "fa-solid fa-percentage" },
+            { label: "Portfolio Weighting", value: data.portfolioWeighting ? `${data.portfolioWeighting.usdc}% USDC, ${data.portfolioWeighting.sol}% SOL` : 'Please Wait', icon: "fa-solid fa-chart-pie", fullWidth: true },
+            { label: "SOL Balance", value: formatValue(data.solBalance, '', ' SOL'), icon: "fa-solid fa-coins" },
+            { label: "USDC Balance", value: formatValue(data.usdcBalance, '', ' USDC'), icon: "fa-solid fa-credit-card" },
+            { label: "Average Entry Price", value: formatValue(data.averageEntryPrice?.[priceUnit], priceLabel), icon: "fa-solid fa-sign-in-alt" },
+            { label: "Average Sell Price", value: formatValue(data.averageSellPrice?.[priceUnit], priceLabel), icon: "fa-solid fa-sign-out-alt" },
+            { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
+            { label: "Estimated APY (Compared to Holding 100% SOL)", value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
         );
+
+        if (serverType === 'wave') {
+            // Format sentiment streak - handle both string and object cases
+            let streakDisplay = 'No streak';
+            if (data.sentimentStreak) {
+                if (typeof data.sentimentStreak === 'object') {
+                    // If it's an object with fgi values, show those
+                    streakDisplay = data.sentimentStreak.values || 'No streak';
+                } else if (Array.isArray(data.sentimentStreak)) {
+                    // If it's an array, join the values
+                    streakDisplay = data.sentimentStreak.join(', ');
+                } else {
+                    // If it's a simple value, show it directly
+                    streakDisplay = data.sentimentStreak.toString();
+                }
+            }
+
+            dataPoints.push(
+                { label: "Current Sentiment Streak", value: streakDisplay, icon: "fa-solid fa-trophy" },
+                { label: "Streak Threshold", value: formatValue(data.streakThreshold), icon: "fa-solid fa-bullseye" },
+                { label: "Average Streak Length", value: formatValue(data.streakStats?.averageLength), icon: "fa-solid fa-bars-progress" },
+                { label: "Total Streaks", value: formatValue(data.streakStats?.totalStreaks), icon: "fa-solid fa-chart-line" }
+            );
+        }
     }
 
-    tradingDataElement.innerHTML = dataPoints.map(point => `
-        <div class="data-item ${point.fullWidth ? 'full-width' : ''}">
-            <div class="data-icon"><i class="${point.icon}"></i></div>
-            <div class="data-content">
-                <div class="data-label">${point.label}</div>
-                <div class="data-value">${point.value}</div>
+    // Add error handling for DOM manipulation
+    try {
+        tradingDataElement.innerHTML = dataPoints.map(point => `
+            <div class="data-item ${point.fullWidth ? 'full-width' : ''}">
+                <div class="data-icon"><i class="${point.icon}"></i></div>
+                <div class="data-content">
+                    <div class="data-label">${point.label}</div>
+                    <div class="data-value">${point.value}</div>
+                </div>
             </div>
-        </div>
-    `).join('');
+        `).join('');
 
-    updateFGI(data.fearGreedIndex);
+        if (data?.fearGreedIndex) {
+            updateFGI(data.fearGreedIndex);
+        }
+    } catch (error) {
+        console.error('Error updating trading data UI:', error);
+        tradingDataElement.innerHTML = '<div>Error displaying trading data. Please refresh the page.</div>';
+    }
 }
 
 function updateFGI(value) {

@@ -5,7 +5,11 @@ const { getTimestamp, formatTime, getWaitTime, logTradingData, getVersion } = re
 const { server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState } = require('./waveServer');
 const { setWallet, setConnection, getWallet, getConnection } = require('./globalState');
 const cliProgress = require('cli-progress');
+const path = require('path');
+const csv = require('csv-writer').createObjectCsvWriter;
+const fs = require('fs')
 
+// Global variables
 let isCurrentExecutionCancelled = false;
 let globalTimeoutId;
 let position;
@@ -16,10 +20,14 @@ let SENTIMENT_MULTIPLIERS;
 let wallet = getWallet();
 let connection = getConnection();
 
+// Streak tracking globals
 let sentimentStreak = [];
-let STREAK_THRESHOLD = 5; // Configurable, set to 5 as an example
+let STREAK_THRESHOLD = 5;
+let totalStreaks = 0;
+let totalStreakLength = 0;
 
-// Create the progress bar
+const STREAK_LOG_PATH = path.join(__dirname, '..', '..', 'user', 'wave_streaks.csv');
+
 const progressBar = new cliProgress.SingleBar({
     format: 'Progress |{bar}| {percentage}% | {remainingTime}',
     barCompleteChar: '\u2588',
@@ -28,6 +36,46 @@ const progressBar = new cliProgress.SingleBar({
     stopOnComplete: true,
     clearOnComplete: true
 });
+
+const streakLogger = csv({
+    path: STREAK_LOG_PATH,
+    header: [
+        { id: 'timestamp', title: 'Time of Streak' },
+        { id: 'length', title: 'Streak Length' },
+        { id: 'type', title: 'Streak Type' },
+        { id: 'values', title: 'FGI Values' }
+    ],
+    append: true
+});
+
+async function loadHistoricalStreaks() {
+    try {
+        if (!fs.existsSync(STREAK_LOG_PATH)) {
+            console.log("No streak history file found. Starting fresh.");
+            return { totalStreaks: 0, totalLength: 0 };
+        }
+
+        const fileContent = await fs.promises.readFile(STREAK_LOG_PATH, 'utf-8');
+        const lines = fileContent.split('\n');
+
+        // Skip header row
+        const dataLines = lines.slice(1).filter(line => line.trim().length > 0);
+
+        let totalLength = 0;
+        const count = dataLines.length;
+
+        for (const line of dataLines) {
+            const [timestamp, length] = line.split(',');
+            totalLength += parseInt(length) || 0;
+        }
+
+        console.log(`Loaded ${count} historical streaks with total length ${totalLength}`);
+        return { totalStreaks: count, totalLength };
+    } catch (error) {
+        console.error('Error loading streak history:', error);
+        return { totalStreaks: 0, totalLength: 0 };
+    }
+}
 
 function cleanupProgressBar() {
     try {
@@ -71,6 +119,81 @@ function startProgressBar(totalSeconds) {
     return updateInterval;
 }
 
+async function logStreak(streak) {
+    if (!streak || streak.length < 2) return;
+
+    const now = new Date();
+    const timestamp = now.toISOString().replace('T', ' ').slice(0, 19);
+
+    const fgiValues = streak.map(s => s.fgi).join(', ');
+    const streakType = streak[0].sentiment.includes('FEAR') ? 'Fear' : 'Greed';
+
+    // Update streak statistics after validating the streak
+    totalStreaks++;
+    totalStreakLength += streak.length;
+    const averageStreakLength = (totalStreakLength / totalStreaks).toFixed(2);
+
+    const data = [{
+        timestamp: timestamp,
+        length: streak.length,
+        type: streakType,
+        values: fgiValues
+    }];
+
+    try {
+        await streakLogger.writeRecords(data);
+        console.log(`Logged ${streakType} streak of ${streak.length} readings with values: ${fgiValues}`);
+        console.log(`Average streak length: ${averageStreakLength} (Total streaks: ${totalStreaks})`);
+    } catch (error) {
+        console.error('Error logging streak:', error);
+    }
+}
+
+function updateSentimentStreak(sentiment, fearGreedIndex) {
+    // Create an object containing both sentiment and FGI value
+    const currentReading = {
+        sentiment: sentiment,
+        fgi: fearGreedIndex
+    };
+
+    if (sentiment === "NEUTRAL") {
+        if (sentimentStreak.length >= 2) {
+            console.log(`Sentiment returned to NEUTRAL after streak of ${sentimentStreak.length} readings`);
+            logStreak(sentimentStreak);
+        }
+        sentimentStreak = [];
+    } else if (sentimentStreak.length === 0) {
+        sentimentStreak.push(currentReading);
+    } else {
+        const lastSentiment = sentimentStreak[sentimentStreak.length - 1].sentiment;
+        if ((sentiment === "EXTREME_FEAR" && lastSentiment === "FEAR") ||
+            (sentiment === "FEAR" && lastSentiment === "EXTREME_FEAR") ||
+            (sentiment === "EXTREME_GREED" && lastSentiment === "GREED") ||
+            (sentiment === "GREED" && lastSentiment === "EXTREME_GREED") ||
+            sentiment === lastSentiment) {
+            sentimentStreak.push(currentReading);
+        } else {
+            if (sentimentStreak.length >= 2) {
+                logStreak(sentimentStreak);
+            }
+            sentimentStreak = [currentReading];
+        }
+    }
+
+    // Format streak display string for UI - only show FGI values
+    const streakDisplay = sentimentStreak.length > 0
+        ? sentimentStreak.map(s => s.fgi).join(', ')
+        : 'No streak';
+
+    console.log(`Current streak values: ${streakDisplay}`);
+
+    return streakDisplay;
+}
+
+function shouldTrade(sentiment) {
+    return sentimentStreak.length >= STREAK_THRESHOLD && sentiment === "NEUTRAL";
+}
+
 async function main() {
     console.log("Entering WaveSurfer main function");
     isCurrentExecutionCancelled = false;
@@ -110,17 +233,16 @@ async function main() {
             return;
         }
 
-        // Update sentiment streak
-        updateSentimentStreak(sentiment);
+        // Get streak display for UI
+        const streakDisplay = updateSentimentStreak(sentiment, fearGreedIndex);
 
         let swapResult = null;
         let recentTrade = null;
         let txId = null;
 
-        // Wave trading logic - trade based on sentiment streak
+        // Wave trading logic
         if (!MONITOR_MODE && shouldTrade(sentiment)) {
-            // Determine the trade sentiment based on the streak
-            const tradeSentiment = sentimentStreak[0]; // Use the first sentiment in the streak
+            const tradeSentiment = sentimentStreak[0].sentiment; // Use the first sentiment in the streak
             swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
 
             if (isCurrentExecutionCancelled) {
@@ -138,7 +260,6 @@ async function main() {
             } else {
                 console.log(`${getTimestamp()}: Trade execution failed - no swap performed`);
             }
-            // Reset streak after attempting trade, regardless of success
             sentimentStreak = [];
         } else if (MONITOR_MODE) {
             console.log("Monitor Mode: Data collected without trading.");
@@ -155,7 +276,7 @@ async function main() {
         console.log(`Total Volume: ${enhancedStats.totalVolume.sol} SOL / ${enhancedStats.totalVolume.usdc} USDC ($${enhancedStats.totalVolume.usd})`);
         console.log(`Balances: SOL: ${enhancedStats.balances.sol.initial} -> ${enhancedStats.balances.sol.current}, USDC: ${enhancedStats.balances.usdc.initial} -> ${enhancedStats.balances.usdc.current}`);
         console.log(`Average Prices: Entry: $${enhancedStats.averagePrices.entry}, Sell: $${enhancedStats.averagePrices.sell}`);
-        console.log(`Current Sentiment Streak: ${sentimentStreak.join(', ')}`);
+        console.log(`Current Sentiment Streak Values: ${streakDisplay}`);
         console.log("------------------------------------\n");
 
         console.log(`Jito Bundle ID: ${txId}`);
@@ -178,8 +299,12 @@ async function main() {
             initialSolBalance: position.initialSolBalance,
             initialUsdcBalance: position.initialUsdcBalance,
             startTime: position.startTime,
-            sentimentStreak: sentimentStreak.join(', '),
-            streakThreshold: STREAK_THRESHOLD
+            sentimentStreak: streakDisplay,
+            streakThreshold: STREAK_THRESHOLD,
+            streakStats: {
+                averageLength: totalStreaks > 0 ? (totalStreakLength / totalStreaks).toFixed(2) : '0',
+                totalStreaks: totalStreaks
+            }
         };
 
         console.log('Emitting trading data with version:', getVersion());
@@ -205,7 +330,15 @@ async function main() {
             },
             tradingData,
             settings: readSettings(),
-            sentimentStreak
+            streakData: {
+                sentimentStreak,
+                totalStreaks,
+                totalStreakLength,
+                streakStats: {
+                    averageLength: totalStreaks > 0 ? (totalStreakLength / totalStreaks).toFixed(2) : '0',
+                    totalStreaks: totalStreaks
+                }
+            }
         });
 
     } catch (error) {
@@ -236,7 +369,6 @@ async function main() {
             } catch (scheduleError) {
                 console.error('Error scheduling next execution:', scheduleError);
                 cleanupProgressBar();
-                // Attempt to recover by scheduling another run in 5 minutes
                 setTimeout(async () => {
                     if (!isCurrentExecutionCancelled) {
                         await main();
@@ -249,34 +381,6 @@ async function main() {
     }
 }
 
-function updateSentimentStreak(sentiment) {
-    if (sentiment === "NEUTRAL") {
-        if (sentimentStreak.length >= STREAK_THRESHOLD) {
-            console.log(`Sentiment returned to NEUTRAL after streak of ${sentimentStreak.length} ${sentimentStreak[0]} readings.`);
-        } else {
-            sentimentStreak = [];
-        }
-    } else if (sentimentStreak.length === 0) {
-        sentimentStreak.push(sentiment);
-    } else {
-        const lastSentiment = sentimentStreak[sentimentStreak.length - 1];
-        if ((sentiment === "EXTREME_FEAR" && lastSentiment === "FEAR") ||
-            (sentiment === "FEAR" && lastSentiment === "EXTREME_FEAR") ||
-            (sentiment === "EXTREME_GREED" && lastSentiment === "GREED") ||
-            (sentiment === "GREED" && lastSentiment === "EXTREME_GREED") ||
-            sentiment === lastSentiment) {
-            sentimentStreak.push(sentiment);
-        } else {
-            sentimentStreak = [sentiment];
-        }
-    }
-    console.log(`Current sentiment streak: ${sentimentStreak.join(', ')}`);
-}
-
-function shouldTrade(currentSentiment) {
-    return sentimentStreak.length >= STREAK_THRESHOLD && currentSentiment === "NEUTRAL";
-}
-
 async function initialize() {
     const { loadEnvironment } = require('./utils');
 
@@ -286,6 +390,12 @@ async function initialize() {
     console.log(".env successfully applied");
 
     clearTimeout(globalTimeoutId);
+
+    // Load historical streaks first
+    const historicalStreaks = await loadHistoricalStreaks();
+    totalStreaks = historicalStreaks.totalStreaks;
+    totalStreakLength = historicalStreaks.totalLength;
+    console.log(`Initialized with ${totalStreaks} historical streaks, average length: ${totalStreaks > 0 ? (totalStreakLength / totalStreaks).toFixed(2) : '0'}`);
 
     const savedState = loadState();
     console.log("SaveState :", savedState ? "Found" : "Not found");
@@ -298,7 +408,23 @@ async function initialize() {
             savedState.position.initialPrice
         );
         Object.assign(position, savedState.position);
-        setInitialData(savedState.tradingData);
+
+        // Update trading data with correct streak stats before setting initial data
+        const updatedTradingData = {
+            ...savedState.tradingData,
+            streakStats: {
+                averageLength: totalStreaks > 0 ? (totalStreakLength / totalStreaks).toFixed(2) : '0',
+                totalStreaks: totalStreaks
+            }
+        };
+        setInitialData(updatedTradingData);
+
+        // Only restore current streak from saved state, keep historical totals
+        if (savedState.streakData && savedState.streakData.sentimentStreak) {
+            sentimentStreak = savedState.streakData.sentimentStreak || [];
+            console.log("Restored current streak:", sentimentStreak);
+        }
+
         console.log("Position and initial data set from saved state");
     } else {
         console.log("No saved state found. Starting fresh.");
@@ -322,6 +448,21 @@ async function resetPosition(wallet, connection) {
     console.log("Resetting position...");
     wallet = getWallet();
     connection = getConnection();
+
+    // Reset streak tracking
+    totalStreaks = 0;
+    totalStreakLength = 0;
+    sentimentStreak = [];
+    try {
+        if (fs.existsSync(STREAK_LOG_PATH)) {
+            //Reset file with just headers (probably better)
+            const headers = 'Time of Streak,Streak Length,Streak Type,FGI Values\n';
+            fs.writeFileSync(STREAK_LOG_PATH, headers);
+            console.log("Streak history file reset successfully");
+        }
+    } catch (error) {
+        console.error('Error resetting streak history file:', error);
+    }
 
     if (!wallet || !connection) {
         throw new Error("Wallet or connection is not initialized in resetPosition");
@@ -348,7 +489,12 @@ async function resetPosition(wallet, connection) {
         initialSolBalance: solBalance,
         initialUsdcBalance: usdcBalance,
         startTime: Date.now(),
-        sentimentStreak: [],
+        sentimentStreak: 'No Streak',
+        streakThreshold: STREAK_THRESHOLD,
+        streakStats: {
+            averageLength: '0',  // Start with '0' instead of 'N/A'
+            totalStreaks: 0
+        }
     };
 
     setInitialData(initialData);
@@ -374,7 +520,12 @@ async function resetPosition(wallet, connection) {
             totalVolumeUsdc: position.totalVolumeUsdc
         },
         tradingData: initialData,
-        settings: readSettings()
+        settings: readSettings(),
+        streakStats: {
+            totalStreaks: 0,
+            totalStreakLength: 0
+        },
+        sentimentStreak: []
     });
 }
 
@@ -383,7 +534,7 @@ function handleParameterUpdate(newParams) {
     console.log('New parameters:');
     console.log(JSON.stringify(newParams, null, 2));
 
-    const updatedSettings = readSettings(); // Read the updated settings
+    const updatedSettings = readSettings();
 
     if (updatedSettings.SENTIMENT_BOUNDARIES) {
         SENTIMENT_BOUNDARIES = updatedSettings.SENTIMENT_BOUNDARIES;
@@ -431,9 +582,11 @@ paramUpdateEmitter.on('restartTrading', async () => {
 
     // Reset the cancellation flag and sentiment streak
     isCurrentExecutionCancelled = false;
-    if (typeof sentimentStreak !== 'undefined') {
-        sentimentStreak = [];
-    }
+
+    // Reset streak tracking
+    totalStreaks = 0;
+    totalStreakLength = 0;
+    sentimentStreak = [];
 
     // Calculate the time until the next interval
     const waitTime = getWaitTime();
@@ -441,7 +594,6 @@ paramUpdateEmitter.on('restartTrading', async () => {
 
     console.log(`Next trading cycle will start at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
 
-    // Set up a progress bar for the wait time
     const totalSeconds = Math.ceil(waitTime / 1000);
     progressBar.start(totalSeconds, 0, {
         remainingTime: formatTime(waitTime)

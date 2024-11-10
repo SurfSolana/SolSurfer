@@ -22,9 +22,11 @@ let connection = getConnection();
 
 // Streak tracking globals
 let sentimentStreak = [];
-let STREAK_THRESHOLD = 5;
 let totalStreaks = 0;
 let totalStreakLength = 0;
+
+const initialSettings = readSettings();
+let STREAK_THRESHOLD = initialSettings.STREAK_THRESHOLD || 5; // Default to 5 if not found
 
 const STREAK_LOG_PATH = path.join(__dirname, '..', '..', 'user', 'wave_streaks.csv');
 
@@ -150,18 +152,18 @@ async function logStreak(streak) {
 }
 
 function updateSentimentStreak(sentiment, fearGreedIndex) {
-    // Create an object containing both sentiment and FGI value
     const currentReading = {
         sentiment: sentiment,
         fgi: fearGreedIndex
     };
 
     if (sentiment === "NEUTRAL") {
+        // Only log the streak, don't clear it yet
         if (sentimentStreak.length >= 2) {
             console.log(`Sentiment returned to NEUTRAL after streak of ${sentimentStreak.length} readings`);
-            logStreak(sentimentStreak);
+            // Note: moved logStreak() call to main() after trading check
         }
-        sentimentStreak = [];
+        // Don't clear streak here - let main() handle it after trading check
     } else if (sentimentStreak.length === 0) {
         sentimentStreak.push(currentReading);
     } else {
@@ -174,19 +176,19 @@ function updateSentimentStreak(sentiment, fearGreedIndex) {
             sentimentStreak.push(currentReading);
         } else {
             if (sentimentStreak.length >= 2) {
+                // Log broken streak
                 logStreak(sentimentStreak);
             }
             sentimentStreak = [currentReading];
         }
     }
 
-    // Format streak display string for UI - only show FGI values
+    // Format streak display string for UI
     const streakDisplay = sentimentStreak.length > 0
         ? sentimentStreak.map(s => s.fgi).join(', ')
         : 'No streak';
 
     console.log(`Current streak values: ${streakDisplay}`);
-
     return streakDisplay;
 }
 
@@ -242,7 +244,7 @@ async function main() {
 
         // Wave trading logic
         if (!MONITOR_MODE && shouldTrade(sentiment)) {
-            const tradeSentiment = sentimentStreak[0].sentiment; // Use the first sentiment in the streak
+            const tradeSentiment = sentimentStreak[0].sentiment;
             swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
 
             if (isCurrentExecutionCancelled) {
@@ -260,9 +262,20 @@ async function main() {
             } else {
                 console.log(`${getTimestamp()}: Trade execution failed - no swap performed`);
             }
+
+            // Log only if streak length >= 2, but always clear streak after trading
+            if (sentimentStreak.length >= 2) {
+                await logStreak(sentimentStreak);
+            }
+            console.log("Clearing sentiment streak after trade");
             sentimentStreak = [];
         } else if (MONITOR_MODE) {
             console.log("Monitor Mode: Data collected without trading.");
+            // If in monitor mode and we hit NEUTRAL, still log the streak
+            if (sentiment === "NEUTRAL" && sentimentStreak.length >= 2) {
+                await logStreak(sentimentStreak);
+                sentimentStreak = [];
+            }
         }
 
         const enhancedStats = position.getEnhancedStatistics(currentPrice);

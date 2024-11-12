@@ -393,6 +393,9 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
     let currentAttempt = 1;
     isBundleCancelled = false;
 
+    const inputMint = initialQuote.inToken;
+    const outputMint = initialQuote.outToken;
+
     while (currentAttempt <= maxAttempts && !isBundleCancelled) {
         try {
             console.log(`\nAttempt ${currentAttempt}/${maxAttempts} to send Jito bundle...`);
@@ -500,7 +503,7 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
                     finalBlockhash: blockhash
                 };
             } else if (confirmationResult.status === "Failed") {
-                console.log(`\nBundle failed on attempt ${currentAttempt}. Reason: ${confirmationResult.reason}`);
+                console.log(`\nBundle failed on attempt ${currentAttempt}. Reason: ${confirmationResult.status}`);
                 console.log(`Failed blockhash was: ${blockhash}`);
 
                 if (currentAttempt === maxAttempts) {

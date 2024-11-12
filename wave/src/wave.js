@@ -157,39 +157,35 @@ function updateSentimentStreak(sentiment, fearGreedIndex) {
         fgi: fearGreedIndex
     };
 
-    if (sentiment === "NEUTRAL") {
-        // Only log the streak, don't clear it yet
-        if (sentimentStreak.length >= 2) {
-            console.log(`Sentiment returned to NEUTRAL after streak of ${sentimentStreak.length} readings`);
-            // Note: moved logStreak() call to main() after trading check
-        }
-        // Don't clear streak here - let main() handle it after trading check
-    } else if (sentimentStreak.length === 0) {
-        sentimentStreak.push(currentReading);
-    } else {
-        const lastSentiment = sentimentStreak[sentimentStreak.length - 1].sentiment;
-        if ((sentiment === "EXTREME_FEAR" && lastSentiment === "FEAR") ||
-            (sentiment === "FEAR" && lastSentiment === "EXTREME_FEAR") ||
-            (sentiment === "EXTREME_GREED" && lastSentiment === "GREED") ||
-            (sentiment === "GREED" && lastSentiment === "EXTREME_GREED") ||
-            sentiment === lastSentiment) {
+    // If we're starting fresh
+    if (sentimentStreak.length === 0) {
+        if (sentiment !== "NEUTRAL") {
             sentimentStreak.push(currentReading);
-        } else {
-            if (sentimentStreak.length >= 2) {
-                // Log broken streak
-                logStreak(sentimentStreak);
-            }
-            sentimentStreak = [currentReading];
         }
+        return { display: 'No streak', wasCleared: false };
     }
 
-    // Format streak display string for UI
-    const streakDisplay = sentimentStreak.length > 0
-        ? sentimentStreak.map(s => s.fgi).join(', ')
-        : 'No streak';
+    const lastSentiment = sentimentStreak[sentimentStreak.length - 1].sentiment;
+    
+    // Check if sentiment follows valid pattern
+    const followsPattern = (
+        (sentiment === "EXTREME_FEAR" && lastSentiment === "FEAR") ||
+        (sentiment === "FEAR" && lastSentiment === "EXTREME_FEAR") ||
+        (sentiment === "EXTREME_GREED" && lastSentiment === "GREED") ||
+        (sentiment === "GREED" && lastSentiment === "EXTREME_GREED") ||
+        sentiment === lastSentiment
+    );
 
-    console.log(`Current streak values: ${streakDisplay}`);
-    return streakDisplay;
+    // If pattern continues, add to streak
+    if (followsPattern) {
+        sentimentStreak.push(currentReading);
+        const streakDisplay = sentimentStreak.map(s => s.fgi).join(', ');
+        return { display: streakDisplay, wasCleared: false };
+    }
+
+    // Streak is ending
+    const streakDisplay = sentimentStreak.map(s => s.fgi).join(', ');
+    return { display: streakDisplay, wasCleared: true };
 }
 
 function shouldTrade(sentiment) {
@@ -236,7 +232,8 @@ async function main() {
         }
 
         // Get streak display for UI
-        const streakDisplay = updateSentimentStreak(sentiment, fearGreedIndex);
+        const streakResult = updateSentimentStreak(sentiment, fearGreedIndex);
+        let streakDisplay = streakResult.display;
 
         let swapResult = null;
         let recentTrade = null;
@@ -246,12 +243,12 @@ async function main() {
         if (!MONITOR_MODE && shouldTrade(sentiment)) {
             const tradeSentiment = sentimentStreak[0].sentiment;
             swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
-
+        
             if (isCurrentExecutionCancelled) {
                 console.log("Execution cancelled. Exiting main.");
                 return;
             }
-
+        
             if (swapResult) {
                 txId = swapResult.txId;
                 recentTrade = updatePositionFromSwap(position, swapResult, tradeSentiment, currentPrice);
@@ -262,18 +259,27 @@ async function main() {
             } else {
                 console.log(`${getTimestamp()}: Trade execution failed - no swap performed`);
             }
-
-            // Log only if streak length >= 2, but always clear streak after trading
+        
+            // Log and clear streak after trading
             if (sentimentStreak.length >= 2) {
                 await logStreak(sentimentStreak);
             }
             console.log("Clearing sentiment streak after trade");
             sentimentStreak = [];
+            streakDisplay = 'No streak - Recently Traded';
+        } else if (streakResult.wasCleared) {
+            // Pattern broke or hit neutral without threshold - log and clear
+            if (sentimentStreak.length >= 2) {
+                await logStreak(sentimentStreak);
+            }
+            sentimentStreak = [];
+            streakDisplay = 'No streak';
         } else if (MONITOR_MODE) {
             console.log("Monitor Mode: Data collected without trading.");
             // If in monitor mode and we hit NEUTRAL, still log the streak
             if (sentiment === "NEUTRAL" && sentimentStreak.length >= 2) {
                 await logStreak(sentimentStreak);
+                streakDisplay = 'No streak - Recently Cleared';
                 sentimentStreak = [];
             }
         }

@@ -1,10 +1,10 @@
 
 # SolSurfer: Solana Fear and Greed Index Trading Suite 🏄‍♂️🌊
 
-![GitHub last commit](https://img.shields.io/github/last-commit/SpuddyA7X/SolSurfer)
-![GitHub issues](https://img.shields.io/github/issues/SpuddyA7X/SolSurfer)
-![GitHub number of milestones](https://img.shields.io/github/milestones/all/SpuddyA7X/SolSurfer)
-![GitHub stars](https://img.shields.io/github/stars/SpuddyA7X/SolSurfer?style=social)
+![GitHub last commit](https://img.shields.io/github/last-commit/SurfSolana/SolSurfer)
+![GitHub issues](https://img.shields.io/github/issues/SurfSolana/SolSurfer)
+![GitHub number of milestones](https://img.shields.io/github/milestones/all/SurfSolana/SolSurfer)
+![GitHub stars](https://img.shields.io/github/stars/SurfSolana/SolSurfer?style=social)
 [![Twitter Follow](https://img.shields.io/twitter/follow/spuddya7x?style=social)](https://twitter.com/spuddya7x)
 
 [Join our Discord community](https://discord.gg/H5MCsYjckc) to discuss SolSurfer, get support, and stay updated on the latest developments.
@@ -63,7 +63,7 @@ WaveSurfer uses a momentum-based approach, trading on sustained sentiment trends
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/Spuddya7x/SolSurfer.git
+git clone https://github.com/SurfSolana/SolSurfer.git
 cd solsurfer
 ```
 
@@ -197,12 +197,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check [issues page](https://github.com/SpuddyA7X/solsurfer/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check [issues page](https://github.com/SurfSolana/solsurfer/issues).
 
 ## 👨‍💻 Author
 
 **SpuddyA7X**
-- GitHub: [@SpuddyA7X](https://github.com/SpuddyA7X)
+- GitHub: [@SurfSolana](https://github.com/SurfSolana)
 - Twitter: [@SpuddyA7X](https://twitter.com/SpuddyA7X)
 
 ## 🌟 Show your support

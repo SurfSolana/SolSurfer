@@ -63,7 +63,7 @@ WaveSurfer uses a momentum-based approach, trading on sustained sentiment trends
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/Spuddya7x/SolSurfer.git
+git clone https://github.com/SurfSolana/SolSurfer.git
 cd solsurfer
 ```
 

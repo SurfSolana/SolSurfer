@@ -26,6 +26,7 @@ let totalStreaks = 0;
 let totalStreakLength = 0;
 
 const initialSettings = readSettings();
+
 let STREAK_THRESHOLD = initialSettings.STREAK_THRESHOLD || 5; // Default to 5 if not found
 
 const STREAK_LOG_PATH = path.join(__dirname, '..', '..', 'user', 'wave_streaks.csv');

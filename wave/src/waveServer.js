@@ -44,7 +44,6 @@ PORT=3000
         USER_MONTHLY_COST: 0,
         DEVELOPER_TIP_PERCENTAGE: 0,
         MONITOR_MODE: false,
-
         // PulseSurfer specific settings
         SENTIMENT_MULTIPLIERS: {
             EXTREME_FEAR: 0.05,
@@ -52,7 +51,6 @@ PORT=3000
             GREED: 0.03,
             EXTREME_GREED: 0.05
         },
-
         // WaveSurfer specific settings
         STREAK_THRESHOLD: 5,
         TRADE_MULTIPLIER: 15  // Percentage of balance to trade
@@ -146,7 +144,7 @@ function updateSettings(newSettings) {
     const currentSettings = readSettings();
     const updatedSettings = { ...currentSettings, ...newSettings };
 
-    //ensure tip is at least 0
+    // ensure tip is at least 0
     updatedSettings.DEVELOPER_TIP_PERCENTAGE = Math.max(0, updatedSettings.DEVELOPER_TIP_PERCENTAGE);
 
     // ensure MONITOR_MODE is a boolean
@@ -355,35 +353,81 @@ io.on('connection', (socket) => {
 });
 
 // Exchange rate functionality
-let currentExchangeRate = 0.909592; // Default value from the provided JSON
-let nextUpdateTime = Date.now(); // Initialize to current time
+let currentExchangeRate = 0.909592; // Default value
+let nextUpdateTime = Date.now();
+let exchangeRateAttempted = false;
+let updateTimeout = null;
+let lastSuccessfulUpdate = null;
 
 async function fetchExchangeRate() {
+    // If already attempting to fetch, return early
+    if (exchangeRateAttempted) {
+        console.log('Exchange rate update already in progress');
+        return;
+    }
+
+    // Clear any existing timeout
+    if (updateTimeout) {
+        clearTimeout(updateTimeout);
+        updateTimeout = null;
+    }
+
     try {
+        exchangeRateAttempted = true;
+        console.log('Fetching new exchange rate...');
+        
         const response = await axios.get('https://open.er-api.com/v6/latest/USD');
         const data = response.data;
 
         if (data.result === "success") {
             currentExchangeRate = data.rates.EUR;
-            console.log('\nUSD/EUR exchange rate:', currentExchangeRate);
-
-            // Set the next update time
+            lastSuccessfulUpdate = Date.now();
             nextUpdateTime = data.time_next_update_unix * 1000; // Convert to milliseconds
-            console.log('Next USD/EUR update:', new Date(nextUpdateTime).toUTCString());
+            
+            console.log(`USD/EUR exchange rate updated: ${currentExchangeRate}`);
+            console.log(`Next update scheduled for: ${new Date(nextUpdateTime).toUTCString()}`);
 
-            // Schedule the next update
-            const timeUntilNextUpdate = nextUpdateTime - Date.now();
-            setTimeout(fetchExchangeRate, timeUntilNextUpdate);
+            // Schedule next update with minimum delay of 1 hour
+            const timeUntilNextUpdate = Math.max(
+                nextUpdateTime - Date.now(),
+                60 * 60 * 1000 // Minimum 1 hour delay
+            );
+
+            updateTimeout = setTimeout(() => {
+                exchangeRateAttempted = false;
+                fetchExchangeRate();
+            }, timeUntilNextUpdate);
+
         } else {
-            console.error('Failed to fetch exchange rate:', data);
-            // Retry after 1 hour if there's an error
-            setTimeout(fetchExchangeRate, 60 * 60 * 1000);
+            handleExchangeRateError(new Error('API returned unsuccessful result'));
         }
     } catch (error) {
-        console.error('Error fetching exchange rate:', error);
-        // Retry after 1 hour if there's an error
-        setTimeout(fetchExchangeRate, 60 * 60 * 1000);
+        handleExchangeRateError(error);
+    } finally {
+        if (!updateTimeout) {
+            exchangeRateAttempted = false;
+        }
     }
+}
+
+function handleExchangeRateError(error) {
+    console.error('Error fetching exchange rate:', error.message);
+    
+    // Clear any existing timeout
+    if (updateTimeout) {
+        clearTimeout(updateTimeout);
+    }
+
+    // If we haven't had a successful update in 24 hours, log a warning
+    if (lastSuccessfulUpdate && (Date.now() - lastSuccessfulUpdate > 24 * 60 * 60 * 1000)) {
+        console.warn('Warning: Exchange rate has not been updated in over 24 hours');
+    }
+
+    // Retry after 1 hour
+    updateTimeout = setTimeout(() => {
+        exchangeRateAttempted = false;
+        fetchExchangeRate();
+    }, 60 * 60 * 1000);
 }
 
 function calculateAPY(initialValue, currentValue, runTimeInDays) {

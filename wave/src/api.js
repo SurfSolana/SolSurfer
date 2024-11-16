@@ -53,7 +53,7 @@ function getSentiment(data) {
     return "NEUTRAL";
 }
 
-async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 5, retryDelay = 5000) {
+async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 20, retryDelay = 5000) {
 	
 	    if (!BASE_PRICE_URL || !TOKEN) {
         throw new Error('BASE_PRICE_URL and TOKEN are required');

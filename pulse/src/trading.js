@@ -93,24 +93,33 @@ function cancelPendingBundle() {
 }
 
 async function executeSwap(wallet, sentiment, USDC, SOL) {
-    try {
-        console.log("Initiating swap");
+    let tradeAmount;
+    let isBuying;
+    let inputMint;
+    let outputMint;
 
-        const isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
-        const inputMint = isBuying ? USDC.ADDRESS : SOL.ADDRESS;
-        const outputMint = isBuying ? SOL.ADDRESS : USDC.ADDRESS;
+    try {
+        console.log("Initiating swap with sentiment:", sentiment);
+
+        isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
+        inputMint = isBuying ? USDC.ADDRESS : SOL.ADDRESS;
+        outputMint = isBuying ? SOL.ADDRESS : USDC.ADDRESS;
         const balance = isBuying ? wallet.usdcBalance : wallet.solBalance;
 
-        const tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
+        tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
 
         if (!tradeAmount || tradeAmount <= 0) {
-            throw new Error(`Invalid trade amount calculated: ${tradeAmount}`);
+            console.log('Invalid trade amount calculated');
+            return null;
         }
+
+        console.log(`Calculated trade amount: ${tradeAmount}`);
 
         // Get initial quote
         let quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
         if (!quoteResponse) {
-            throw new Error('Failed to get initial quote response');
+            console.log('Failed to get quote');
+            return null;
         }
 
         let swapTransaction = await getFeeAccountAndSwapTransaction(
@@ -121,27 +130,25 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         );
 
         if (!swapTransaction) {
-            throw new Error('Failed to create swap transaction');
+            console.log('Failed to create swap transaction');
+            return null;
         }
 
         const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse);
+
+        if (!jitoBundleResult) return null;
 
         // Calculate final amounts for successful trade
         const inputAmount = tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS));
         const outputAmount = jitoBundleResult.finalQuote.outAmount / (10 ** (isBuying ? SOL.DECIMALS : USDC.DECIMALS));
 
-        // Log the trade outcome
         logTradeToFile({
             inputToken: isBuying ? 'USDC' : 'SOL',
             outputToken: isBuying ? 'SOL' : 'USDC',
             inputAmount: inputAmount.toFixed(6),
             outputAmount: outputAmount.toFixed(6),
-            jitoStatus: jitoBundleResult ? 'Success' : 'Failed'
+            jitoStatus: 'Success'
         });
-
-        if (!jitoBundleResult) {
-            throw new Error('Jito bundle failed after all attempts');
-        }
 
         const solChange = isBuying ? jitoBundleResult.finalQuote.outAmount / (10 ** SOL.DECIMALS) : -tradeAmount / (10 ** SOL.DECIMALS);
         const usdcChange = isBuying ? -tradeAmount / (10 ** USDC.DECIMALS) : jitoBundleResult.finalQuote.outAmount / (10 ** USDC.DECIMALS);
@@ -156,18 +163,16 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         };
 
     } catch (error) {
-        // Log failed trade
-        if (tradeAmount) {
-            logTradeToFile({
-                inputToken: isBuying ? 'USDC' : 'SOL',
-                outputToken: isBuying ? 'SOL' : 'USDC',
-                inputAmount: (tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))).toFixed(6),
-                outputAmount: '0',
-                jitoStatus: 'Failed'
-            });
-        }
+        // Only log the essential information on failure
+        logTradeToFile({
+            inputToken: isBuying ? 'USDC' : 'SOL',
+            outputToken: isBuying ? 'SOL' : 'USDC',
+            inputAmount: tradeAmount ? (tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS))).toFixed(6) : '0',
+            outputAmount: '0',
+            jitoStatus: 'Failed'
+        });
 
-        throw error;
+        return null;
     }
 }
 
@@ -384,150 +389,99 @@ async function jitoTipCheck() {
     });
 }
 
-async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, maxAttempts = 5) {
-    let currentAttempt = 1;
+async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote) {
     isBundleCancelled = false;
 
-    while (currentAttempt <= maxAttempts && !isBundleCancelled) {
-        try {
-            console.log(`\nAttempt ${currentAttempt}/${maxAttempts} to send Jito bundle...`);
-
-            if (isBundleCancelled) {
-                console.log('Bundle cancelled, abandoning transaction...');
-                return null;
-            }
-
-            // Get a new quote for each attempt
-            const quoteResponse = currentAttempt === 1 ? initialQuote :
-                await getQuote(inputMint, outputMint, tradeAmount);
-
-            if (!quoteResponse) {
-                throw new Error(`Failed to get quote on attempt ${currentAttempt}`);
-            }
-
-            // Get new swap transaction with updated quote
-            const swapTransaction = currentAttempt === 1 ? initialSwapTransaction :
-                await getFeeAccountAndSwapTransaction(
-                    new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
-                    new PublicKey(inputMint),
-                    quoteResponse,
-                    wallet
-                );
-
-            if (!swapTransaction) {
-                throw new Error(`Failed to create swap transaction on attempt ${currentAttempt}`);
-            }
-
-            // Deserialize the transaction
-            const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
-            const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-
-            // Get Jito tip amount
-            const tipValueInSol = await jitoTipCheck();
-            const limitedTipValueInLamports = Math.floor(
-                Math.min(tipValueInSol, maxJitoTip) * 1_000_000_000 * 1.1
-            );
-
-            console.log(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
-
-            if (isBundleCancelled) {
-                console.log('Bundle cancelled after tip calculation, abandoning transaction...');
-                return null;
-            }
-
-            // Get fresh blockhash for each attempt
-            const { blockhash, lastValidBlockHeight } = await wallet.connection.getLatestBlockhash("confirmed");
-            console.log(`\nNew Blockhash for attempt ${currentAttempt}: ${blockhash}`);
-
-            // Create tip transaction with new blockhash
-            const tipAccount = new PublicKey(getRandomTipAccount());
-            const tipIxn = SystemProgram.transfer({
-                fromPubkey: wallet.publicKey,
-                toPubkey: tipAccount,
-                lamports: limitedTipValueInLamports
-            });
-
-            const messageSub = new TransactionMessage({
-                payerKey: wallet.publicKey,
-                recentBlockhash: blockhash,
-                instructions: [tipIxn]
-            }).compileToV0Message();
-
-            const txSub = new VersionedTransaction(messageSub);
-
-            // Update swap transaction with new blockhash
-            transaction.message.recentBlockhash = blockhash;
-
-            // Re-sign both transactions
-            txSub.sign([wallet.payer]);
-            transaction.sign([wallet.payer]);
-
-            const bundleToSend = [transaction, txSub];
-
-            if (isBundleCancelled) {
-                console.log('Bundle cancelled before sending, abandoning transaction...');
-                return null;
-            }
-
-            console.log(`Sending bundle for attempt ${currentAttempt} with blockhash: ${blockhash}`);
-            const jitoBundleResult = await sendJitoBundle(bundleToSend);
-
-            const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
-            const tipTxSignature = bs58.default.encode(txSub.signatures[0]);
-
-            if (isBundleCancelled) {
-                console.log('Bundle cancelled before confirmation, abandoning transaction...');
-                return null;
-            }
-
-            console.log(`\nWaiting for bundle confirmation on attempt ${currentAttempt}...`);
-            const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
-
-            if (confirmationResult.status === "Landed") {
-                console.log(`Bundle landed successfully on attempt ${currentAttempt}`);
-                return {
-                    jitoBundleResult,
-                    swapTxSignature,
-                    tipTxSignature,
-                    finalQuote: quoteResponse,
-                    ...confirmationResult,
-                    attempts: currentAttempt,
-                    finalBlockhash: blockhash
-                };
-            } else if (confirmationResult.status === "Failed") {
-                console.log(`\nBundle failed on attempt ${currentAttempt}. Reason: ${confirmationResult.reason}`);
-                console.log(`Failed blockhash was: ${blockhash}`);
-
-                if (currentAttempt === maxAttempts) {
-                    console.log(`All ${maxAttempts} attempts exhausted. Giving up.`);
-                    return null;
-                }
-            }
-        } catch (error) {
-            if (isBundleCancelled) {
-                console.log('Bundle cancelled during error handling, abandoning retry attempts...');
-                return null;
-            }
-            console.error(`\nError in bundle attempt ${currentAttempt}:`, error.message);
-            if (currentAttempt === maxAttempts) {
-                console.log(`All ${maxAttempts} attempts exhausted. Giving up.`);
-                return null;
-            }
-        }
+    try {
+        console.log(`\nAttempting to send Jito bundle...`);
 
         if (isBundleCancelled) {
-            console.log('Bundle cancelled before retry, abandoning transaction...');
+            console.log('Bundle cancelled, abandoning transaction...');
             return null;
         }
 
-        currentAttempt++;
-        if (currentAttempt <= maxAttempts) {
-            console.log(`\nWaiting 5 seconds before retry ${currentAttempt}...`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
+        // Deserialize the transaction
+        let transaction;
+        try {
+            const swapTransactionBuf = Buffer.from(initialSwapTransaction, 'base64');
+            transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+        } catch (error) {
+            console.log('Failed to deserialize transaction');
+            return null;
         }
-    }
 
-    return null;
+        // Get Jito tip amount
+        let tipValueInSol;
+        try {
+            tipValueInSol = await jitoTipCheck();
+        } catch (error) {
+            tipValueInSol = maxJitoTip; // Fallback to max tip if check fails
+        }
+
+        const limitedTipValueInLamports = Math.floor(
+            Math.min(tipValueInSol, maxJitoTip) * 1_000_000_000 * 1.1
+        );
+
+        console.log(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
+
+        if (isBundleCancelled) return null;
+
+        // Get fresh blockhash
+        const { blockhash } = await wallet.connection.getLatestBlockhash("confirmed");
+        console.log(`\nNew Blockhash: ${blockhash}`);
+
+        // Create tip transaction with new blockhash
+        const tipAccount = new PublicKey(getRandomTipAccount());
+        const tipIxn = SystemProgram.transfer({
+            fromPubkey: wallet.publicKey,
+            toPubkey: tipAccount,
+            lamports: limitedTipValueInLamports
+        });
+
+        const messageSub = new TransactionMessage({
+            payerKey: wallet.publicKey,
+            recentBlockhash: blockhash,
+            instructions: [tipIxn]
+        }).compileToV0Message();
+
+        const txSub = new VersionedTransaction(messageSub);
+        transaction.message.recentBlockhash = blockhash;
+
+        txSub.sign([wallet.payer]);
+        transaction.sign([wallet.payer]);
+
+        const bundleToSend = [transaction, txSub];
+
+        console.log(`Sending bundle with blockhash: ${blockhash}`);
+        const jitoBundleResult = await sendJitoBundle(bundleToSend);
+
+        const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
+        const tipTxSignature = bs58.default.encode(txSub.signatures[0]);
+
+        if (isBundleCancelled) return null;
+
+        console.log(`\nWaiting for bundle confirmation...`);
+        const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
+
+        if (confirmationResult.status === "Landed") {
+            console.log(`Bundle landed successfully`);
+            return {
+                jitoBundleResult,
+                swapTxSignature,
+                tipTxSignature,
+                finalQuote: initialQuote,
+                ...confirmationResult,
+                finalBlockhash: blockhash
+            };
+        } 
+        
+        console.log(`\nBundle failed. Blockhash: ${blockhash}`);
+        return null;
+
+    } catch (error) {
+        console.log('Bundle execution failed');
+        return null;
+    }
 }
 
 async function waitForBundleConfirmation(bundleId) {

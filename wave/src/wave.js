@@ -1,5 +1,5 @@
 const Position = require('./Position');
-const { executeSwap, updatePortfolioBalances, USDC, SOL, updatePositionFromSwap, logPositionUpdate, cancelPendingBundle } = require('./trading');
+const { executeSwap, updatePortfolioBalances, USDC, SOL, updatePositionFromSwap, logPositionUpdate, cancelPendingBundle, calculateTradeAmount } = require('./trading');
 const { fetchFearGreedIndex, getSentiment, fetchPrice, BASE_PRICE_URL } = require('./api');
 const { getTimestamp, formatTime, getWaitTime, logTradingData, getVersion } = require('./utils');
 const { server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState } = require('./waveServer');
@@ -26,6 +26,7 @@ let totalStreaks = 0;
 let totalStreakLength = 0;
 
 const initialSettings = readSettings();
+const MIN_USD_VALUE = 5
 
 let STREAK_THRESHOLD = initialSettings.STREAK_THRESHOLD || 5; // Default to 5 if not found
 
@@ -120,6 +121,18 @@ function startProgressBar(totalSeconds) {
     }, 1000);
 
     return updateInterval;
+}
+
+async function minimumBalanceCheck(balance, amount, isSol, currentPrice) {
+    const balanceInUSD = isSol ? balance * currentPrice : balance;
+    const amountInUSD = isSol ? amount * currentPrice : amount;
+    const remainingBalanceUSD = balanceInUSD - amountInUSD;
+    
+    if (remainingBalanceUSD < MIN_USD_VALUE) {
+        console.log(`${getTimestamp()}: Trade blocked - Would leave ${isSol ? 'SOL' : 'USDC'} balance below $${MIN_USD_VALUE}`);
+        return false;
+    }
+    return true;
 }
 
 async function logStreak(streak) {
@@ -239,29 +252,65 @@ async function main() {
         let swapResult = null;
         let recentTrade = null;
         let txId = null;
+        const MAX_ATTEMPTS = 5;
 
         // Wave trading logic
         if (!MONITOR_MODE && shouldTrade(sentiment)) {
             const tradeSentiment = sentimentStreak[0].sentiment;
-            swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
+            let attempt = 1;
+            let success = false;
         
-            if (isCurrentExecutionCancelled) {
-                console.log("Execution cancelled. Exiting main.");
-                return;
-            }
+            while (attempt <= MAX_ATTEMPTS && !success && !isCurrentExecutionCancelled) {
+                console.log(`\nAttempt ${attempt}/${MAX_ATTEMPTS} to execute trade...`);
+                
+                try {
+                    const isSol = !sentimentStreak[0].sentiment.includes('FEAR');
+                    const balance = isSol ? position.solBalance : position.usdcBalance;
+                    
+                    // Calculate trade amount in smallest units
+                    const rawTradeAmount = calculateTradeAmount(balance, tradeSentiment, isSol ? SOL : USDC);
+                    
+                    // Convert to native units for minimumBalanceCheck
+                    const tradeAmount = rawTradeAmount / Math.pow(10, isSol ? SOL.DECIMALS : USDC.DECIMALS);
+                    
+                    if (!await minimumBalanceCheck(balance, tradeAmount, isSol, currentPrice)) {
+                        console.log(`${getTimestamp()}: Trade skipped - minimum balance protection`);
+                        break;
+                    }
         
-            if (swapResult) {
-                txId = swapResult.txId;
-                recentTrade = updatePositionFromSwap(position, swapResult, tradeSentiment, currentPrice);
-                if (recentTrade) {
-                    addRecentTrade(recentTrade);
-                    console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);
+                    // Pass the raw trade amount to executeSwap
+                    swapResult = await executeSwap(wallet, tradeSentiment, USDC, SOL);
+                    
+                    if (swapResult) {
+                        success = true;
+                        txId = swapResult.txId;
+                        recentTrade = updatePositionFromSwap(position, swapResult, tradeSentiment, currentPrice);
+                        if (recentTrade) {
+                            addRecentTrade(recentTrade);
+                            console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);
+                        }
+                    } else {
+                        console.log(`${getTimestamp()}: Trade attempt ${attempt} failed - retrying in 5 seconds...`);
+                        if (attempt < MAX_ATTEMPTS) {
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error during trade attempt ${attempt}:`, error);
+                    if (attempt < MAX_ATTEMPTS) {
+                        console.log('Waiting 5 seconds before retry...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 }
-            } else {
-                console.log(`${getTimestamp()}: Trade execution failed - no swap performed`);
+        
+                attempt++;
             }
         
-            // Log and clear streak after trading
+            if (!success) {
+                console.log(`${getTimestamp()}: All ${MAX_ATTEMPTS} trade attempts failed`);
+            }
+        
+            // Log and clear streak after trading (regardless of success)
             if (sentimentStreak.length >= 2) {
                 await logStreak(sentimentStreak);
             }

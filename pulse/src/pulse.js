@@ -130,7 +130,6 @@ async function main() {
         const MAX_ATTEMPTS = 5;
 
         // Pulse trading logic - trade on any non-neutral sentiment
-        // Pulse trading logic - trade on any non-neutral sentiment
         if (!MONITOR_MODE && sentiment !== "NEUTRAL") {
             let attempt = 1;
             let success = false;

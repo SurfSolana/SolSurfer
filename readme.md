@@ -6,7 +6,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/SurfSolana/SolSurfer?style=social)
 [![Twitter Follow](https://img.shields.io/twitter/follow/spuddya7x?style=social)](https://twitter.com/spuddya7x)
 
-[Join our Discord community](https://discord.gg/H5MCsYjckc) to discuss SolSurfer, get support, and stay updated on the latest developments.
+[Join our Discord community](https://discord.gg/dpzudaBwSa) to discuss SolSurfer, get support, and stay updated on the latest developments.
 
 SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC trading on the Solana blockchain. What sets our bot apart from AI trading bots is our transparent approach - combining targeted machine learning for performance optimization with clear, understandable trading strategies. Our dual trading approaches leverage Fear and Greed Index analysis with ML-optimized parameters, giving you the best of both worlds: advanced technology with complete clarity on how your trades are executed.
 
@@ -21,6 +21,64 @@ Join our Discord community to discuss SolSurfer, get support, and stay updated o
 - 📊 Performance tracking
 - 🖥️ Web dashboard
 - 🔒 Security features
+
+## Contents 📑
+
+- [Features](#features-)
+- [Trading Strategies](#trading-strategies-)
+  - [PulseSurfer: Sentiment Trading](#1-pulsesurfer-sentiment-trading)
+  - [WaveSurfer: Momentum Trading](#2-wavesurfer-momentum-trading)
+- [Quick Start](#quick-start-)
+- [Full Setup](#full-setup-%EF%B8%8F)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+- [Running SolSurfer](#running-solsurfer-%EF%B8%8F)
+- [Dashboard Features](#dashboard-features-)
+- [Choose Your Strategy](#choose-your-strategy-)
+- [Risk Disclaimer](#risk-disclaimer-%EF%B8%8F)
+- [License](#license-)
+- [Contributing](#contributing-)
+- [Author](#author-)
+- [Show your support](#show-your-support-)
+
+## Quick Start 🚀
+
+1.  **Prerequisites**
+```bash
+# Install Node.js from nodejs.org
+# Update npm
+npm install -g npm
+# Install Git from git-scm.com
+```
+2.  **Installation**
+```bash
+# Clone and enter directory
+git clone https://github.com/SurfSolana/SolSurfer.git
+cd solsurfer
+# Install dependencies
+npm install
+```
+3.  **Configuration**
+```bash
+# Create and edit .env file in /user/
+# Windows:
+copy user\.env.example user\.env
+#
+# Mac/Linux:
+cp user/.env.example user/.env
+# Edit with your details:
+# PRIVATE_KEY=your_wallet_private_key
+# RPC_URL=your_solana_rpc_url
+# ADMIN_PASSWORD=your_web_interface_password
+# PORT=3000
+```
+4.  **Launch**
+```bash
+# Start the bot
+For Windows, run the file: start_surfer.bat
+For Mac/Linux: start_surfer.sh
+# Note: For Mac/Linux, make the file executable first: ```chmod +x start_surfer.sh```
+```
 
 ## Trading Strategies 📊
 
@@ -48,13 +106,14 @@ Position Sizing:
 - Trade size set by Trade Multiplier
 - Default is 15% of selling token balance
 
-## Setup 🛠️
+## Full Setup 🛠️
 
 ### Prerequisites
-- Node.js (v14+)
-- npm (v6+)
-- Solana wallet with SOL and USDC
-- Recommended: $50 minimum in each token
+- Node.js (v14+) (https://nodejs.org/en/)
+- npm (v6+) (After installing Node above, in a command line, run ```npm i -g npm``` )
+- Git CLI installed ([Git Download Link](https://git-scm.com/downloads))
+- Solana wallet with SOL and USDC (Recommended: $50 minimum in each token)
+- A reliable Solana RPC Connection: [Try Helius for Free](https://dashboard.helius.dev/login)
 
 ### Installation
 Clone the repository:
@@ -71,7 +130,9 @@ npm install
 Run the bot using either:
 
 Windows: start_surfer.bat
+
 Mac/Linux: start_surfer.sh
+
 Note: For Mac/Linux, make the file executable first:
 ```bash
 chmod +x start_surfer.sh
@@ -81,13 +142,20 @@ Select your trading strategy (1: PulseSurfer or 2: WaveSurfer)
 
 Edit the `.env` file with your details:
 ```
+# Your wallet's private key (keep this secret!)
 PRIVATE_KEY=your_wallet_private_key
+
+# Your Solana RPC endpoint URL
 RPC_URL=your_solana_rpc_url
+
+# Password for accessing the web interface
 ADMIN_PASSWORD=your_web_interface_password
+
+# Port for the web dashboard
 PORT=3000
 ```
 
-Configure trading parameters in `settings.json`:
+Configure trading parameters in `settings.json` or via the web interface:
 ```json
 {
   "SENTIMENT_BOUNDARIES": {
@@ -115,9 +183,14 @@ Configure trading parameters in `settings.json`:
 ## Running SolSurfer 🏃‍♂️
 
 Start the trading bot:
-```bash
-npm start
-```
+
+Windows: start_surfer.bat
+
+Mac/Linux: start_surfer.sh
+
+-Or-
+
+```node user/start.js```
 
 Select your trading strategy:
 1. PulseSurfer (direct sentiment trading)

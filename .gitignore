@@ -17,3 +17,4 @@ saveState.json
 user/*
 !/user/start.js
 !/user/.gitkeep
+!/user/.env.example

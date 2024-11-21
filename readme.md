@@ -77,6 +77,7 @@ cp user/.env.example user/.env
 # Start the bot
 For Windows, run the file: start_surfer.bat
 For Mac/Linux: start_surfer.sh
+Or: node user/start.js
 # Note: For Mac/Linux, make the file executable first: ```chmod +x start_surfer.sh```
 ```
 
@@ -140,7 +141,7 @@ chmod +x start_surfer.sh
 
 Select your trading strategy (1: PulseSurfer or 2: WaveSurfer)
 
-Edit the `.env` file with your details:
+Edit the `.env` file (found in user folder) with your details:
 ```
 # Your wallet's private key (keep this secret!)
 PRIVATE_KEY=your_wallet_private_key

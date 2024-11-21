@@ -10,8 +10,6 @@
 
 SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC trading on the Solana blockchain. What sets our bot apart from AI trading bots is our transparent approach - combining targeted machine learning for performance optimization with clear, understandable trading strategies. Our dual trading approaches leverage Fear and Greed Index analysis with ML-optimized parameters, giving you the best of both worlds: advanced technology with complete clarity on how your trades are executed.
 
-Join our Discord community to discuss SolSurfer, get support, and stay updated on the latest developments.
-
 ## Features 🚀
 
 - ✅ Free and open source
@@ -75,10 +73,14 @@ cp user/.env.example user/.env
 4.  **Launch**
 ```bash
 # Start the bot
-For Windows, run the file: start_surfer.bat
-For Mac/Linux: start_surfer.sh
-Or: node user/start.js
-# Note: For Mac/Linux, make the file executable first: ```chmod +x start_surfer.sh```
+# Windows:
+start_surfer.bat
+# Mac/Linux:
+start_surfer.sh
+# Alternative:
+node user/start.js
+# Note: For Mac/Linux, make the file executable first:
+chmod +x start_surfer.sh
 ```
 
 ## Trading Strategies 📊

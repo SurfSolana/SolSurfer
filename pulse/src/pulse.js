@@ -127,7 +127,7 @@ async function main() {
         let swapResult = null;
         let recentTrade = null;
         let txId = null;
-        const MAX_ATTEMPTS = 5;
+        const MAX_ATTEMPTS = 10;
 
         // Pulse trading logic - trade on any non-neutral sentiment
         if (!MONITOR_MODE && sentiment !== "NEUTRAL") {

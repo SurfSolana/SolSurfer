@@ -252,7 +252,7 @@ async function main() {
         let swapResult = null;
         let recentTrade = null;
         let txId = null;
-        const MAX_ATTEMPTS = 5;
+        const MAX_ATTEMPTS = 10;
 
         // Wave trading logic
         if (!MONITOR_MODE && shouldTrade(sentiment)) {

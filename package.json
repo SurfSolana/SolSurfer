@@ -1,6 +1,6 @@
 {
   "name": "solsurfer",
-  "version": "2.1.15",
+  "version": "2.2.0",
   "description": "",
   "main": "start.js",
   "keywords": [],
@@ -8,6 +8,8 @@
   "license": "ISC",
   "dependencies": {
     "@project-serum/anchor": "^0.26.0",
+    "@project-serum/borsh": "^0.2.5",
+    "@solana/buffer-layout": "^4.0.0",
     "@solana/spl-token": "^0.4.8",
     "@solana/web3.js": "^1.95.3",
     "axios": "^1.7.5",

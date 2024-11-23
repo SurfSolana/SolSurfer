@@ -1,13 +1,15 @@
 const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
 const { readSettings } = require('./pulseServer');
-const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram } = require('@solana/web3.js');
+const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram, TransactionInstruction } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
 const WebSocket = require('ws');
 const fetch = require('cross-fetch');
 const fs = require('fs');
 const path = require('path');
+const BN = require('bn.js');
+const borsh = require('@coral-xyz/borsh');
 
 let isBundleCancelled = false;
 
@@ -134,7 +136,7 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
             return null;
         }
 
-        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse);
+        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse, isBuying);
 
         if (!jitoBundleResult) return null;
 
@@ -352,6 +354,72 @@ async function resetPosition() {
     });
 }
 
+function create_increment_tx(
+    wallet,
+    recentBlockhash,
+    successful_trades,
+    sol_lamport_volume,
+    usd_lamport_volume,
+    jup_lamport_volume,
+    wif_lamport_volume,
+    bonk_lamport_volume
+) {
+    const discrim = [
+        171,
+        200,
+        174,
+        106,
+        229,
+        34,
+        80,
+        175
+    ];
+    const layout = borsh.struct([
+        borsh.u128('successful_trades'),
+        borsh.u128('sol_lamport_volume'),
+        borsh.u128('usd_lamport_volume'),
+        borsh.u128('jup_lamport_volume'),
+        borsh.u128('wif_lamport_volume'),
+        borsh.u128('bonk_lamport_volume')
+    ]);
+
+    const buffer = Buffer.alloc(1000)
+
+    const len = layout.encode(
+        {
+            successful_trades: new BN(successful_trades),
+            sol_lamport_volume: new BN(sol_lamport_volume),
+            usd_lamport_volume: new BN(usd_lamport_volume),
+            jup_lamport_volume: new BN(jup_lamport_volume),
+            wif_lamport_volume: new BN(wif_lamport_volume),
+            bonk_lamport_volume: new BN(bonk_lamport_volume)
+        },
+        buffer
+    )
+
+    const data = Buffer.concat([new Uint8Array(discrim), buffer]).slice(0, 8 + len)
+
+    const msg = new TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash,
+        instructions: [
+            new TransactionInstruction({
+                programId: new PublicKey("8GWdLKu8aA21f98pAA5oaqkQjt6NBUFdaVNkjyQAfpnD"),
+                keys: [
+                    { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: new PublicKey("GNZtRcvcik8UBtekeLDBY34K1yiuVv7mej8g5aPgZxhh"), isSigner: false, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
+                ],
+                data
+            })
+        ]
+    }).compileToV0Message();
+
+    const tx = new VersionedTransaction(msg);
+    tx.sign([wallet.payer]);
+    return tx;
+}
+
 // Jito-related functions
 
 function getRandomTipAccount() {
@@ -389,9 +457,8 @@ async function jitoTipCheck() {
     });
 }
 
-async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote) {
+async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, isBuying) {
     isBundleCancelled = false;
-
     try {
         console.log(`\nAttempting to send Jito bundle...`);
 
@@ -444,13 +511,39 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
             instructions: [tipIxn]
         }).compileToV0Message();
 
+        const successful_trades = 1n; // Always increment by 1 for a successful trade (Bundles will only ever be successful, the tx doesnt land otherwise so we never have to account for fails)
+        const sol_lamport_volume = BigInt(!isBuying ? tradeAmount : 0); // Only if selling SOL
+        const usd_lamport_volume = BigInt(isBuying ? tradeAmount : 0); // Only if buying SOL
+        const jup_lamport_volume = 0n;
+        const wif_lamport_volume = 0n;
+        const bonk_lamport_volume = 0n;
+
+        console.log(successful_trades)
+        console.log(sol_lamport_volume)
+        console.log(usd_lamport_volume)
+        console.log(jup_lamport_volume)
+        console.log(wif_lamport_volume)
+        console.log(bonk_lamport_volume)
+
+        const incrementTx = create_increment_tx(
+            wallet,
+            blockhash,
+            successful_trades,
+            sol_lamport_volume,
+            usd_lamport_volume, 
+            jup_lamport_volume,
+            wif_lamport_volume,
+            bonk_lamport_volume
+        );
+
         const txSub = new VersionedTransaction(messageSub);
         transaction.message.recentBlockhash = blockhash;
 
+        incrementTx.sign([wallet.payer]);
         txSub.sign([wallet.payer]);
         transaction.sign([wallet.payer]);
 
-        const bundleToSend = [transaction, txSub];
+        const bundleToSend = [transaction, txSub, incrementTx];
 
         console.log(`Sending bundle with blockhash: ${blockhash}`);
         const jitoBundleResult = await sendJitoBundle(bundleToSend);
@@ -479,7 +572,7 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
         return null;
 
     } catch (error) {
-        console.log('Bundle execution failed');
+        console.log('Bundle execution failed:', error); // Add error details
         return null;
     }
 }

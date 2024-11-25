@@ -165,6 +165,61 @@ button:hover {
     color: var(--secondary);
 }
 
+.data-item {
+    position: relative;
+}
+
+.tooltip-trigger {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: help;
+}
+
+.tooltip-trigger .tooltip {
+    visibility: hidden;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    right: 0;
+    background-color: var(--card-bg);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--primary);
+    width: max-content;
+    max-width: 250px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    white-space: normal;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.tooltip-trigger:hover .tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Add arrow */
+.tooltip-trigger .tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: var(--primary) transparent transparent transparent;
+}
+
+/* Hover effect for trigger icon */
+.tooltip-trigger:hover {
+    color: var(--secondary);
+}
 .timestamp {
     font-size: 14px;
     color: var(--text);

@@ -16,6 +16,24 @@ const fgiGaugeElement = document.getElementById('fgiGauge');
 const fgiPointerElement = document.getElementById('fgiPointer');
 const tradeListElement = document.getElementById('tradeList');
 
+const tooltipDefinitions = {
+    'Portfolio Value': "Current total value of all assets in your trading portfolio",
+    'Portfolio Total Change': "Net percentage change in portfolio value since trading began",
+    'SOL Price': "Current market price of SOL token",
+    'Solana Market Change': "Percentage change in SOL price since bot started trading",
+    'Portfolio Weighting': "Current balance distribution between SOL and USDC as percentages",
+    'SOL Balance': "Available SOL tokens in your trading wallet",
+    'USDC Balance': "Available USDC tokens in your trading wallet", 
+    'Average Entry Price': "Average price paid when buying SOL",
+    'Average Sell Price': "Average price received when selling SOL",
+    'Program Run Time (Hours/Mins/Seconds)': "Total time elapsed since trading began",
+    'Estimated APY (Compared to Holding 100% SOL)': "Estimated annual return compared to holding 100% SOL, includes trading fees and costs",
+    'Current Sentiment Streak': "Current sequence of similar market sentiment readings",
+    'Streak Threshold': "Minimum consecutive sentiment readings needed to trigger a trade",
+    'Average Streak Length': "Average duration of completed sentiment streaks",
+    'Total Streaks': "Total number of completed sentiment streaks since trading began"
+};
+
 let sentimentBoundaries = {
     EXTREME_FEAR: 20,
     FEAR: 40,
@@ -191,6 +209,12 @@ function updateTradingData(data) {
                     <div class="data-label">${point.label}</div>
                     <div class="data-value">${point.value}</div>
                 </div>
+                ${tooltipDefinitions[point.label] ? `
+                    <div class="tooltip-trigger">
+                        <i class="fa-regular fa-circle-question"></i>
+                        <div class="tooltip">${tooltipDefinitions[point.label]}</div>
+                    </div>
+                ` : ''}
             </div>
         `).join('');
 

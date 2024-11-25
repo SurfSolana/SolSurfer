@@ -1,6 +1,7 @@
 const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
 const { readSettings } = require('./pulseServer');
+const { attemptRPCFailover } = require('./utils');
 const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram, TransactionInstruction } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
@@ -204,9 +205,27 @@ async function updatePortfolioBalances(wallet, connection) {
     if (!wallet || !connection) {
         throw new Error("Wallet or connection is not initialized");
     }
+    
     try {
         const solBalance = await getTokenBalance(connection, wallet.publicKey.toString(), SOL.ADDRESS);
         const usdcBalance = await getTokenBalance(connection, wallet.publicKey.toString(), USDC.ADDRESS);
+
+        // Check if balances are suspiciously zero - might indicate RPC issue
+        if (solBalance === 0 && usdcBalance === 0) {
+            console.log("Warning: Both balances returned as 0, attempting RPC failover...");
+            const failoverSuccess = await attemptRPCFailover(wallet);
+            
+            if (failoverSuccess) {
+                // Retry with new connection
+                const newSolBalance = await getTokenBalance(wallet.connection, wallet.publicKey.toString(), SOL.ADDRESS);
+                const newUsdcBalance = await getTokenBalance(wallet.connection, wallet.publicKey.toString(), USDC.ADDRESS);
+                
+                wallet.solBalance = newSolBalance;
+                wallet.usdcBalance = newUsdcBalance;
+                
+                return { solBalance: newSolBalance, usdcBalance: newUsdcBalance };
+            }
+        }
 
         wallet.solBalance = solBalance;
         wallet.usdcBalance = usdcBalance;
@@ -214,6 +233,14 @@ async function updatePortfolioBalances(wallet, connection) {
         return { solBalance, usdcBalance };
     } catch (error) {
         console.error("Error updating portfolio balances:", error);
+        
+        // Attempt failover on error
+        const failoverSuccess = await attemptRPCFailover(wallet);
+        if (failoverSuccess) {
+            // Retry the balance update with new connection
+            return updatePortfolioBalances(wallet, wallet.connection);
+        }
+        
         throw error;
     }
 }

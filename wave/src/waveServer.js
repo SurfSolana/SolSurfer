@@ -23,11 +23,12 @@ function ensureRequiredFiles() {
 
     if (!fs.existsSync(envPath)) {
         const defaultEnvContent = `
-PRIVATE_KEY=
-RPC_URL=
-ADMIN_PASSWORD=
-PORT=3000
-`;
+        PRIMARY_RPC=
+        SECONDARY_RPC=        # Optional: Recommended for improved reliability
+        PRIVATE_KEY=
+        ADMIN_PASSWORD=
+        PORT=3000
+        `;
         fs.writeFileSync(envPath, defaultEnvContent.trim());
         console.log('.env file created. Please fill in the required values before running the application again.');
         filesCreated = true;
@@ -36,25 +37,27 @@ PORT=3000
     const DEFAULT_SETTINGS = {
         // Shared settings between both bots
         SENTIMENT_BOUNDARIES: {
-            EXTREME_FEAR: 15,
-            FEAR: 35,
-            GREED: 65,
-            EXTREME_GREED: 85
+          EXTREME_FEAR: 15,
+          FEAR: 35,
+          GREED: 65,
+          EXTREME_GREED: 85
         },
         USER_MONTHLY_COST: 0,
         DEVELOPER_TIP_PERCENTAGE: 0,
         MONITOR_MODE: false,
+    
         // PulseSurfer specific settings
         SENTIMENT_MULTIPLIERS: {
-            EXTREME_FEAR: 0.05,
-            FEAR: 0.03,
-            GREED: 0.03,
-            EXTREME_GREED: 0.05
+          EXTREME_FEAR: 0.04,
+          FEAR: 0.02,
+          GREED: 0.02,
+          EXTREME_GREED: 0.04
         },
+    
         // WaveSurfer specific settings
-        STREAK_THRESHOLD: 5,
-        TRADE_MULTIPLIER: 15  // Percentage of balance to trade
-    };
+        STREAK_THRESHOLD: 4,
+        TRADE_MULTIPLIER: 10  // Percentage of balance to trade
+      };
 
     if (!fs.existsSync(settingsPath)) {
         fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
@@ -72,7 +75,7 @@ PORT=3000
 
 // Function to validate .env contents
 function validateEnvContents() {
-    const requiredEnvVars = ['PRIVATE_KEY', 'RPC_URL', 'ADMIN_PASSWORD'];
+    const requiredEnvVars = ['PRIVATE_KEY', 'PRIMARY_RPC', 'ADMIN_PASSWORD'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
     if (missingVars.length > 0) {
@@ -80,10 +83,17 @@ function validateEnvContents() {
         return false;
     }
 
-    // Validate RPC_URL
-    if (!process.env.RPC_URL.startsWith('http://') && !process.env.RPC_URL.startsWith('https://')) {
-        console.error('Error: RPC_URL must be a valid URL starting with http:// or https://');
+    // Validate Primary RPC URL
+    if (!process.env.PRIMARY_RPC.startsWith('http://') && !process.env.PRIMARY_RPC.startsWith('https://')) {
+        console.error('Error: PRIMARY_RPC must be a valid URL starting with http:// or https://');
         return false;
+    }
+    
+    // Warning for missing Secondary RPC
+    if (!process.env.SECONDARY_RPC) {
+        console.warn('\x1b[33m%s\x1b[0m', 'Warning: No SECONDARY_RPC provided. For improved reliability, consider adding a backup RPC URL.');
+    } else if (!process.env.SECONDARY_RPC.startsWith('http://') && !process.env.SECONDARY_RPC.startsWith('https://')) {
+        console.warn('\x1b[33m%s\x1b[0m', 'Warning: SECONDARY_RPC must be a valid URL starting with http:// or https://. It will be ignored.');
     }
 
     // Validate ADMIN_PASSWORD

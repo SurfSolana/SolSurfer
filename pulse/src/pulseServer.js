@@ -23,11 +23,12 @@ function ensureRequiredFiles() {
 
   if (!fs.existsSync(envPath)) {
     const defaultEnvContent = `
-PRIVATE_KEY=
-RPC_URL=
-ADMIN_PASSWORD=
-PORT=3000
-`;
+    PRIMARY_RPC=
+    SECONDARY_RPC=        # Optional: Recommended for improved reliability
+    PRIVATE_KEY=
+    ADMIN_PASSWORD=
+    PORT=3000
+    `;
     fs.writeFileSync(envPath, defaultEnvContent.trim());
     console.log('.env file created. Please fill in the required values before running the application again.');
     filesCreated = true;
@@ -47,15 +48,15 @@ PORT=3000
 
     // PulseSurfer specific settings
     SENTIMENT_MULTIPLIERS: {
-      EXTREME_FEAR: 0.05,
-      FEAR: 0.03,
-      GREED: 0.03,
-      EXTREME_GREED: 0.05
+      EXTREME_FEAR: 0.04,
+      FEAR: 0.02,
+      GREED: 0.02,
+      EXTREME_GREED: 0.04
     },
 
     // WaveSurfer specific settings
-    STREAK_THRESHOLD: 5,
-    TRADE_MULTIPLIER: 15  // Percentage of balance to trade
+    STREAK_THRESHOLD: 4,
+    TRADE_MULTIPLIER: 10  // Percentage of balance to trade
   };
 
   if (!fs.existsSync(settingsPath)) {
@@ -74,24 +75,31 @@ PORT=3000
 
 // Function to validate .env contents
 function validateEnvContents() {
-  const requiredEnvVars = ['RPC_URL', 'ADMIN_PASSWORD'];
+  const requiredEnvVars = ['PRIVATE_KEY', 'PRIMARY_RPC', 'ADMIN_PASSWORD'];
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
   if (missingVars.length > 0) {
-    console.error(`Error: The following required environment variables are missing or empty: ${missingVars.join(', ')}`);
-    return false;
+      console.error(`Error: The following required environment variables are missing or empty: ${missingVars.join(', ')}`);
+      return false;
   }
 
-  // Validate RPC_URL
-  if (!process.env.RPC_URL.startsWith('http://') && !process.env.RPC_URL.startsWith('https://')) {
-    console.error('Error: RPC_URL must be a valid URL starting with http:// or https://');
-    return false;
+  // Validate Primary RPC URL
+  if (!process.env.PRIMARY_RPC.startsWith('http://') && !process.env.PRIMARY_RPC.startsWith('https://')) {
+      console.error('Error: PRIMARY_RPC must be a valid URL starting with http:// or https://');
+      return false;
+  }
+  
+  // Warning for missing Secondary RPC
+  if (!process.env.SECONDARY_RPC) {
+      console.warn('\x1b[33m%s\x1b[0m', 'Warning: No SECONDARY_RPC provided. For improved reliability, consider adding a backup RPC URL.');
+  } else if (!process.env.SECONDARY_RPC.startsWith('http://') && !process.env.SECONDARY_RPC.startsWith('https://')) {
+      console.warn('\x1b[33m%s\x1b[0m', 'Warning: SECONDARY_RPC must be a valid URL starting with http:// or https://. It will be ignored.');
   }
 
   // Validate ADMIN_PASSWORD
   if (process.env.ADMIN_PASSWORD.length < 8) {
-    console.error('Error: ADMIN_PASSWORD must be at least 8 characters long.');
-    return false;
+      console.error('Error: ADMIN_PASSWORD must be at least 8 characters long.');
+      return false;
   }
 
   return true;

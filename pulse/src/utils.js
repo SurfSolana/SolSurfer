@@ -156,22 +156,47 @@ PORT=3000
 async function loadEnvironment() {
     dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
 
-    if (!process.env.PRIVATE_KEY || !process.env.RPC_URL) {
-        console.error("Missing required environment variables. Please ensure PRIVATE_KEY and RPC_URL are set in your .env file.");
+    if (!process.env.PRIMARY_RPC) {
+        console.error("Missing required PRIMARY_RPC. Please ensure PRIMARY_RPC is set in your .env file.");
         process.exit(1);
     }
 
     try {
         const privateKey = bs58.default.decode(process.env.PRIVATE_KEY);
         const keypair = Keypair.fromSecretKey(new Uint8Array(privateKey));
-        const connection = new Connection(process.env.RPC_URL, 'confirmed');
-        const wallet = new Wallet(keypair);
+        
+        // Connect to primary RPC
+        let connection = new Connection(process.env.PRIMARY_RPC, 'confirmed');
+        
+        // Test connection
+        try {
+            await connection.getBalance(keypair.publicKey);
+            console.log("Connected to primary RPC successfully");
+        } catch (error) {
+            console.error("Primary RPC connection failed:", error.message);
+            
+            // Only try secondary if it exists
+            if (process.env.SECONDARY_RPC) {
+                console.log("Attempting to connect to secondary RPC...");
+                try {
+                    connection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
+                    await connection.getBalance(keypair.publicKey);
+                    console.log("Connected to secondary RPC successfully");
+                } catch (secondaryError) {
+                    console.error("Secondary RPC connection also failed.");
+                    throw new Error("Unable to establish connection to any RPC endpoint");
+                }
+            } else {
+                throw new Error("Primary RPC failed and no secondary RPC configured");
+            }
+        }
 
+        const wallet = new Wallet(keypair);
         wallet.connection = connection;
 
         return { keypair, connection, wallet };
     } catch (error) {
-        console.error("Error verifying keypair:", error.message);
+        console.error("Error verifying keypair or establishing connection:", error.message);
         process.exit(1);
     }
 }
@@ -208,6 +233,32 @@ function getVersion() {
     }
 }
 
+async function attemptRPCFailover(wallet) {
+    // Check if secondary RPC exists
+    if (!process.env.SECONDARY_RPC) {
+        console.log("No secondary RPC configured - cannot attempt failover");
+        return false;
+    }
+
+    try {
+        console.log("Attempting RPC failover...");
+        const newConnection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
+        
+        // Test new connection
+        const isHealthy = await checkConnectionHealth(newConnection, wallet.publicKey);
+        
+        if (isHealthy) {
+            console.log("Successfully failed over to secondary RPC");
+            wallet.connection = newConnection;
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error("Failover attempt failed:", error);
+        return false;
+    }
+}
+
 module.exports = {
     getTimestamp,
     formatTime,
@@ -220,5 +271,6 @@ module.exports = {
     logTradingData,
     setupEnvFile,
     loadEnvironment,
-    getVersion
+    getVersion,
+    attemptRPCFailover
 };

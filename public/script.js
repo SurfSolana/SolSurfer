@@ -31,7 +31,15 @@ const tooltipDefinitions = {
     'Current Sentiment Streak': "Current sequence of similar market sentiment readings",
     'Streak Threshold': "Minimum consecutive sentiment readings needed to trigger a trade",
     'Average Streak Length': "Average duration of completed sentiment streaks",
-    'Total Streaks': "Total number of completed sentiment streaks since trading began"
+    'Total Streaks': "Total number of completed sentiment streaks since trading began",
+    'Win Rate': "Percentage of closed trades that resulted in profit",
+    'Total Trades': "Total number of trades executed since trading began",
+    'Open Positions': "Number of currently active trades that haven't been closed",
+    'Closed Trades': "Number of completed trades that have been fully settled",
+    'Total PnL': "Total realized profit or loss from all closed trades",
+    'Unrealized PnL': "Current estimated profit or loss of open positions based on current market price",
+    'Total Volume': "Total value of all trades executed in USD",
+    'Avg Trade Size': "Average dollar value of individual trades"
 };
 
 let sentimentBoundaries = {
@@ -200,6 +208,40 @@ function updateTradingData(data) {
         }
     }
 
+    if (data.orderbook) {
+        // Update Performance Metrics
+        document.getElementById('winRate').textContent = 
+            `${data.orderbook.winRate ? data.orderbook.winRate.toFixed(1) : '0.0'}%`;
+        document.getElementById('totalTrades').textContent = 
+            data.orderbook.totalTrades || '0';
+        document.getElementById('openTrades').textContent = 
+            data.orderbook.openTrades || '0';
+        document.getElementById('closedTrades').textContent = 
+            data.orderbook.closedTrades || '0';
+
+        // Update Financial Overview
+        const totalPnlElement = document.getElementById('totalPnl');
+        const unrealizedPnlElement = document.getElementById('unrealizedPnl');
+        const volumeElement = document.getElementById('totalVolume');
+        const avgSizeElement = document.getElementById('avgTradeSize');
+
+        totalPnlElement.textContent = `$${data.orderbook.totalRealizedPnl ? data.orderbook.totalRealizedPnl.toFixed(4) : '0.00'}`;
+        unrealizedPnlElement.textContent = `$${data.orderbook.totalUnrealizedPnl ? data.orderbook.totalUnrealizedPnl.toFixed(4) : '0.00'}`;
+        volumeElement.textContent = `$${data.orderbook.totalVolume ? data.orderbook.totalVolume.toFixed(4) : '0.00'}`;
+        avgSizeElement.textContent = data.orderbook.totalTrades > 0 
+            ? `$${(data.orderbook.totalVolume / data.orderbook.totalTrades).toFixed(4)}` 
+            : '$0.00';
+
+        // Add color classes
+        totalPnlElement.className = `data-value ${data.orderbook.totalRealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+        unrealizedPnlElement.className = `data-value ${data.orderbook.totalUnrealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+
+        // Update orderbook table if trades data is present
+        if (data.orderbook.trades) {
+            updateOrderbookTable(data.orderbook.trades);
+        }
+    }
+
     // Add error handling for DOM manipulation
     try {
         tradingDataElement.innerHTML = dataPoints.map(point => `
@@ -225,6 +267,49 @@ function updateTradingData(data) {
         console.error('Error updating trading data UI:', error);
         tradingDataElement.innerHTML = '<div>Error displaying trading data. Please refresh the page.</div>';
     }
+}
+
+function updateOrderbookTable(trades) {
+    const tbody = document.getElementById('orderbookBody');
+    if (!tbody) return;
+
+    // Sort by most recent first
+    const sortedTrades = trades.sort((a, b) => {
+        const dateA = new Date(a.timestamp);
+        const dateB = new Date(b.timestamp);
+        return dateB - dateA;  // Always descending
+    });
+
+    // Limit to 20 most recent trades
+    const limitedTrades = sortedTrades.slice(0, 20);
+
+    // Update table content
+    tbody.innerHTML = limitedTrades.map(trade => `
+        <tr>
+            <td>${trade.timestamp}</td>
+            <td>
+                <span class="trade-badge ${trade.direction === 'buy' ? 'trade-type-buy' : 'trade-type-sell'}">
+                    ${trade.direction.toUpperCase()}
+                </span>
+            </td>
+            <td>
+                <span class="trade-badge ${trade.status === 'open' ? 'trade-status-open' : 'trade-status-closed'}">
+                    ${trade.status.toUpperCase()}
+                </span>
+            </td>
+            <td>$${trade.price.toFixed(2)}</td>
+            <td>${trade.solAmount.toFixed(6)} SOL</td>
+            <td>$${trade.value.toFixed(2)}</td>
+            <td class="${trade.status === 'open' ? 
+                (trade.upnl >= 0 ? 'pnl-positive' : 'pnl-negative') : 
+                (trade.realizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative')}">
+                $${trade.status === 'open' ? 
+                    trade.upnl.toFixed(2) : 
+                    trade.realizedPnl.toFixed(2)}
+            </td>
+            <td>${trade.closePrice ? `$${trade.closePrice.toFixed(2)}` : '-'}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="8" class="empty-state">No trades found</td></tr>';
 }
 
 function updateFGI(value) {
@@ -326,18 +411,28 @@ function addTrade(trade) {
 
     const tradeItem = document.createElement('li');
     const tradeDate = new Date(trade.timestamp);
-    const formattedTime = tradeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    
+    // Format date
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    
+    const dayName = days[tradeDate.getDay()];
+    const day = String(tradeDate.getDate()).padStart(2, '0');
+    const month = months[tradeDate.getMonth()];
+    const time = tradeDate.toTimeString().split(' ')[0];
+    
+    const formattedDate = `${dayName}, ${day}/${month}, ${time}`;
 
     let tradeContent;
     if (trade.success === false) {
-        tradeContent = `${formattedTime}: ${trade.sentiment} transaction failed, click for details`;
+        tradeContent = `${formattedDate}: ${trade.sentiment} transaction failed, click for details`;
         tradeItem.classList.add('trade-failed');
     } else {
         const action = trade.type;
         const amount = parseFloat(trade.amount).toFixed(6);
         const price = parseFloat(trade.price).toFixed(2);
         const unit = 'SOL';
-        tradeContent = `${formattedTime}: ${action} ${amount} ${unit} at $${price}`;
+        tradeContent = `${formattedDate}: ${action} ${amount} ${unit} at $${price}`;
         tradeItem.classList.add(action.toLowerCase() === 'bought' ? 'trade-buy' : 'trade-sell');
     }
 

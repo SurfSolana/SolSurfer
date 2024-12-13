@@ -9,6 +9,8 @@ const csv = require('csv-writer').createObjectCsvWriter;
 
 const LOG_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'fgi_log.csv');
 
+let DEVELOPER_MODE = false;
+
 function getTimestamp() {
     const now = new Date();
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -84,6 +86,8 @@ function updateSettings(newParams) {
     // ensure MONITOR_MODE is a boolean
     updatedSettings.MONITOR_MODE = updatedSettings.MONITOR_MODE === true;
 
+    DEVELOPER_MODE = updatedSettings.DEVELOPER_MODE === true;
+
     writeSettings(updatedSettings);
     return updatedSettings;
 }
@@ -102,7 +106,7 @@ function readSettings() {
 function writeSettings(settings) {
     try {
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
-        console.log('Settings updated successfully.');
+        devLog('Settings updated successfully.');
     } catch (error) {
         console.error('Error writing settings.json:', error);
     }
@@ -128,7 +132,7 @@ async function logTradingData(timestamp, price, indexValue) {
 
     try {
         await csvWriter.writeRecords(data);
-        console.log('Trading data logged successfully');
+        devLog('Trading data logged successfully');
     } catch (error) {
         console.error('Error logging trading data:', error);
     }
@@ -139,7 +143,7 @@ function setupEnvFile() {
     const envPath = path.join(__dirname, '..', '..', 'user', '.env');
 
     if (!fs.existsSync(envPath)) {
-        console.log('.env file not found. Creating a new one...');
+        devLog('.env file not found. Creating a new one...');
 
         const envContent = `PRIVATE_KEY=
 RPC_URL=
@@ -171,17 +175,17 @@ async function loadEnvironment() {
         // Test connection
         try {
             await connection.getBalance(keypair.publicKey);
-            console.log("Connected to primary RPC successfully");
+            devLog("Connected to primary RPC successfully");
         } catch (error) {
             console.error("Primary RPC connection failed:", error.message);
             
             // Only try secondary if it exists
             if (process.env.SECONDARY_RPC) {
-                console.log("Attempting to connect to secondary RPC...");
+                devLog("Attempting to connect to secondary RPC...");
                 try {
                     connection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
                     await connection.getBalance(keypair.publicKey);
-                    console.log("Connected to secondary RPC successfully");
+                    devLog("Connected to secondary RPC successfully");
                 } catch (secondaryError) {
                     console.error("Secondary RPC connection also failed.");
                     throw new Error("Unable to establish connection to any RPC endpoint");
@@ -236,19 +240,19 @@ function getVersion() {
 async function attemptRPCFailover(wallet) {
     // Check if secondary RPC exists
     if (!process.env.SECONDARY_RPC) {
-        console.log("No secondary RPC configured - cannot attempt failover");
+        devLog("No secondary RPC configured - cannot attempt failover");
         return false;
     }
 
     try {
-        console.log("Attempting RPC failover...");
+        devLog("Attempting RPC failover...");
         const newConnection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
         
         // Test new connection
         const isHealthy = await checkConnectionHealth(newConnection, wallet.publicKey);
         
         if (isHealthy) {
-            console.log("Successfully failed over to secondary RPC");
+            devLog("Successfully failed over to secondary RPC");
             wallet.connection = newConnection;
             return true;
         }
@@ -256,6 +260,12 @@ async function attemptRPCFailover(wallet) {
     } catch (error) {
         console.error("Failover attempt failed:", error);
         return false;
+    }
+}
+
+function devLog(...args) {
+    if (DEVELOPER_MODE) {
+        console.log(...args);
     }
 }
 
@@ -272,5 +282,6 @@ module.exports = {
     setupEnvFile,
     loadEnvironment,
     getVersion,
-    attemptRPCFailover
+    attemptRPCFailover,
+    devLog
 };

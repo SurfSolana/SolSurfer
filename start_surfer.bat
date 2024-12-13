@@ -1,6 +1,6 @@
 @echo off
 title SolSurfer Trading System
-color 0a
+color 07
 
 :: Check if Node.js is installed
 where node >nul 2>nul

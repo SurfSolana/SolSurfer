@@ -1,3 +1,5 @@
+const { devLog } = require('./utils');
+
 class Position {
   constructor(initialSolBalance, initialUsdcBalance, initialPrice) {
     this.solBalance = initialSolBalance;
@@ -31,7 +33,7 @@ class Position {
   }
 
   logTrade(sentiment, price, solChange, usdcChange) {
-    console.log('Logging trade:', { sentiment, price, solChange, usdcChange });
+    devLog('Logging trade:', { sentiment, price, solChange, usdcChange });
 
     if (price === undefined || solChange === undefined || usdcChange === undefined) {
       console.error('Invalid trade data. Skipping trade log.');
@@ -62,7 +64,7 @@ class Position {
       this.netSolTraded -= solAmount;
     }
 
-    console.log('After trade update:', {
+    devLog('After trade update:', {
       totalSolBought: this.totalSolBought,
       totalUsdcSpent: this.totalUsdcSpent,
       totalSolSold: this.totalSolSold,
@@ -84,7 +86,7 @@ class Position {
   }
 
   getNetChange(currentPrice) {
-    console.log('getNetChange input:', {
+    devLog('getNetChange input:', {
       currentPrice,
       netSolTraded: this.netSolTraded,
       totalUsdcReceived: this.totalUsdcReceived,
@@ -99,7 +101,7 @@ class Position {
     const currentValueOfTradedSol = this.netSolTraded * currentPrice;
     const netUsdcChange = this.totalUsdcReceived - this.totalUsdcSpent;
 
-    console.log('getNetChange calculation:', {
+    devLog('getNetChange calculation:', {
       currentValueOfTradedSol,
       netUsdcChange,
       totalUsdcReceived: this.totalUsdcReceived,
@@ -108,7 +110,7 @@ class Position {
 
     const netChange = currentValueOfTradedSol + netUsdcChange;
 
-    console.log('getNetChange result:', netChange);
+    devLog('getNetChange result:', netChange);
 
     // If netChange is NaN, return 0 or some default value
     return isNaN(netChange) ? 0 : netChange;
@@ -147,7 +149,7 @@ class Position {
     const totalVolumeUsd = this.totalVolumeUsdc + (this.totalVolumeSol * currentPrice);
     const netChange = this.getNetChange(currentPrice);
 
-    console.log('getEnhancedStatistics:', {
+    devLog('getEnhancedStatistics:', {
       currentPortfolioValue,
       portfolioChange,
       totalRuntime,

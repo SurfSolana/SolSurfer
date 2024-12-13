@@ -670,6 +670,133 @@ input.locked {
     background-color: rgba(240, 240, 240, 0.3); /* Light background to show it's inactive */
     pointer-events: none;       /* Prevents mouse events */
 }
+
+.table-container {
+    overflow-x: auto;
+    margin-top: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--primary);
+}
+
+#orderbookTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+#orderbookTable th {
+    background-color: var(--background);
+    color: var(--secondary);
+    padding: 12px;
+    text-align: left;
+    border-bottom: 2px solid var(--primary);
+    white-space: nowrap;
+}
+
+#orderbookTable td {
+    padding: 12px;
+    border-bottom: 1px solid var(--primary);
+    color: var(--text);
+}
+
+#orderbookTable tbody tr:hover {
+    background-color: var(--background);
+}
+
+#orderbookTable .empty-state {
+    text-align: center;
+    color: var(--text);
+    padding: 20px;
+}
+
+/* Trade Status and Type Badges */
+.trade-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    display: inline-block;
+}
+
+.trade-type-buy {
+    background-color: rgba(20, 241, 149, 0.2);
+    color: var(--secondary);
+}
+
+.trade-type-sell {
+    background-color: rgba(255, 107, 107, 0.2);
+    color: #FF6B6B;
+}
+
+.trade-status-open {
+    background-color: rgba(0, 194, 255, 0.2);
+    color: #00C2FF;
+}
+
+.trade-status-closed {
+    background-color: rgba(128, 128, 128, 0.2);
+    color: #808080;
+}
+
+/* PnL Value Colors */
+.pnl-positive {
+    color: var(--secondary);
+}
+
+.pnl-negative {
+    color: #FF6B6B;
+}
+
+
+.full-width {
+    grid-column: 1 / -1;
+}
+
+.metrics-container {
+    width: 100%;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.header-flex {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+/* Adjust table styles for better full-width display */
+.table-container {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 400px;
+    margin-top: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--primary);
+}
+
+#orderbookTable {
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+/* Ensure all columns have appropriate width */
+#orderbookTable th {
+    white-space: nowrap;
+    padding: 10px 15px;
+}
+
+#orderbookTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--background);
+}
 	
 @media (max-width: 768px) {
     body {
@@ -712,5 +839,36 @@ input.locked {
 
     .trading-data-grid {
         grid-template-columns: 1fr;
+    }
+
+    .table-container {
+        margin: 10px -20px;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
+    #orderbookTable th,
+    #orderbookTable td {
+        padding: 8px;
+        font-size: 12px;
+    }
+
+    .trade-badge {
+        padding: 2px 4px;
+        font-size: 10px;
+    }
+
+    .control-button {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    .control-button i {
+        font-size: 12px;
+    }
+
+    .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }

@@ -6,6 +6,7 @@ class OrderBook {
     constructor() {
         this.trades = [];
         this.storageFile = path.join(__dirname, '..', '..', 'user', 'orderBookStorage.json');
+        this.settingsPath = path.join(__dirname, '..', '..', 'user', 'settings.json');
         devLog('OrderBook storage file path:', this.storageFile);
         this.loadTrades();
         this.cleanupTrades();
@@ -14,6 +15,18 @@ class OrderBook {
             console.warn('Trades not properly initialized, resetting to empty array');
             this.trades = [];
             this.saveTrades();
+        }
+    }
+
+    readSettings() {
+        try {
+            const settingsData = fs.readFileSync(this.settingsPath, 'utf8');
+            return JSON.parse(settingsData);
+        } catch (error) {
+            console.error('Error reading settings.json:', error);
+            return {
+                MIN_PROFIT_PERCENT: 0.2
+            };
         }
     }
 
@@ -189,37 +202,58 @@ class OrderBook {
         return openTrades[0] || null;
     }
 
+    checkTradeProfitability(tradeId, currentPrice) {
+        const settings = this.readSettings();
+        const trade = this.trades.find(t => t.id === tradeId);
+        
+        if (!trade) {
+            return { canClose: false, reason: 'Trade not found' };
+        }
+    
+        // Calculate profit percentage
+        const profitPercent = trade.direction === 'buy' ? 
+            ((currentPrice - trade.price) / trade.price) * 100 :
+            ((trade.price - currentPrice) / trade.price) * 100;
+    
+        // Check minimum profit threshold
+        if (profitPercent < settings.MIN_PROFIT_PERCENT) {
+            return {
+                canClose: false,
+                reason: `Profit (${profitPercent.toFixed(2)}%) below minimum threshold (${settings.MIN_PROFIT_PERCENT}%)`
+            };
+        }
+    
+        return { canClose: true, reason: 'Trade meets closing criteria' };
+    }
+
     closeTrade(tradeId, closePrice) {
-        const tradeIndex = this.trades.findIndex(t => t.id === tradeId);
-        if (tradeIndex === -1) {
+        const trade = this.trades.find(t => t.id === tradeId);
+            
+        if (!trade) {
             console.error(`Trade ${tradeId} not found`);
             return false;
         }
     
-        const trade = this.trades[tradeIndex];
-        const realizedPnl = trade.direction === 'buy' 
-            ? (closePrice - trade.price) * trade.solAmount
-            : (trade.price - closePrice) * trade.solAmount;
+        // Calculate realized PnL
+        const realizedPnl = trade.direction === 'buy' ? 
+            (closePrice - trade.price) * trade.solAmount :
+            (trade.price - closePrice) * trade.solAmount;
     
-        // Update the trade in place
-        this.trades[tradeIndex] = {
-            ...trade,
-            status: 'closed',
-            closedAt: getTimestamp(),
-            closePrice: closePrice,
-            realizedPnl: realizedPnl,
-            upnl: 0
-        };
-    
-        // Clear any duplicate trades with same ID that might be present
-        this.trades = this.trades.filter((t, index) => {
+        // Update the trade
+        this.trades = this.trades.map(t => {
             if (t.id === tradeId) {
-                return index === tradeIndex; // Keep only the one we just updated
+                return {
+                    ...t,
+                    status: 'closed',
+                    closedAt: getTimestamp(),
+                    closePrice: closePrice,
+                    realizedPnl: realizedPnl,
+                    upnl: 0
+                };
             }
-            return true; // Keep all others
+            return t;
         });
     
-        devLog(`Closed trade ${tradeId} with realized PnL: ${realizedPnl}`);
         this.saveTrades();
         return true;
     }

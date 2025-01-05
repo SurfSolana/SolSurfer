@@ -102,13 +102,19 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
     if (oldestMatchingTrade) {
         devLog(`Found opposing trade to close:`, oldestMatchingTrade);
         
+        // Check profitability before executing the trade
+        const profitCheck = orderBook.checkTradeProfitability(oldestMatchingTrade.id, currentPrice);
+        if (!profitCheck.canClose) {
+            console.log(`Trade not ready to close: ${profitCheck.reason}`);
+            return null;
+        }
+        
         try {
             const isClosingBuy = oldestMatchingTrade.direction === 'sell';
             
-            // Calculate exact out amount in smallest units based on original value
             const exactOutAmount = isClosingBuy ? 
-            Math.floor(oldestMatchingTrade.solAmount * Math.pow(10, SOL.DECIMALS)) :   // BUY - get USDC back
-            Math.floor(oldestMatchingTrade.value * Math.pow(10, USDC.DECIMALS)); // SELL - get SOL back
+                Math.floor(oldestMatchingTrade.solAmount * Math.pow(10, SOL.DECIMALS)) :
+                Math.floor(oldestMatchingTrade.value * Math.pow(10, USDC.DECIMALS));
             
             devLog(`Closing trade details:`, {
                 originalTrade: {
@@ -125,9 +131,9 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
             
             const swapResult = await executeExactOutSwap(
                 wallet,
-                isClosingBuy ? SOL.ADDRESS : USDC.ADDRESS,  // What we want to receive
-                exactOutAmount,                             // Amount in smallest units
-                isClosingBuy ? USDC.ADDRESS : SOL.ADDRESS   // What we're paying with
+                isClosingBuy ? SOL.ADDRESS : USDC.ADDRESS,
+                exactOutAmount,
+                isClosingBuy ? USDC.ADDRESS : SOL.ADDRESS
             );
 
             if (swapResult) {
@@ -252,7 +258,11 @@ async function main() {
         
                     console.log("Placing Trade...");
                     swapResult = await executeSwap(wallet, sentiment, USDC, SOL);
-                    if (swapResult) {
+                    if (swapResult === 'cooldownfail' || swapResult === 'fgichangefail') {
+                        // Don't retry for these conditions
+                        console.log(`${getTimestamp()}: Trade failed due to cooldown or FGI change - skipping retry`);
+                        break;
+                    } else if (swapResult) {
                         success = true;
                         break;
                     } else if (attempt < MAX_ATTEMPTS) {
@@ -264,7 +274,7 @@ async function main() {
             }
         
             // Common success handling for both trade types
-            if (swapResult) {
+            if (swapResult && swapResult !== 'cooldownfail' && swapResult !== 'fgichangefail') {
                 txId = swapResult.txId;
 
                 devLog('New position trade successful, updating orderbook...', {

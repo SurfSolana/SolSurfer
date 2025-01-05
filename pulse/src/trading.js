@@ -1,4 +1,4 @@
-const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL } = require('./api');
+const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL, fetchFearGreedIndex, isFGIChangeSignificant } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
 const { readSettings } = require('./pulseServer');
 const { attemptRPCFailover, devLog } = require('./utils');
@@ -11,6 +11,8 @@ const fs = require('fs');
 const path = require('path');
 const BN = require('bn.js');
 const borsh = require('@coral-xyz/borsh');
+
+const lastTradeTime = new Map();
 
 let isBundleCancelled = false;
 
@@ -95,7 +97,42 @@ function cancelPendingBundle() {
     isBundleCancelled = true;
 }
 
+function isTradeOnCooldown(wallet, settings) {
+    const now = Date.now();
+    const lastTrade = lastTradeTime.get(wallet.publicKey.toString());
+    
+    if (!lastTrade) return false;
+    
+    const cooldownMs = settings.TRADE_COOLDOWN_MINUTES * 60 * 1000;
+    const timeSinceLastTrade = now - lastTrade;
+    
+    if (timeSinceLastTrade < cooldownMs) {
+        const remaining = cooldownMs - timeSinceLastTrade;
+        console.log(`Trade cooldown active. ${formatTime(remaining)} remaining`);
+        return true;
+    }
+    
+    return false;
+}
+
 async function executeSwap(wallet, sentiment, USDC, SOL) {
+
+    const settings = readSettings();
+    
+    // Check cooldown
+    if (isTradeOnCooldown(wallet, settings)) {
+        return 'cooldownfail';
+    }
+
+    // Check FGI change significance
+    /*
+    const currentFGI = await fetchFearGreedIndex();
+    if (!isFGIChangeSignificant(currentFGI, settings)) {
+        console.log('FGI change not significant enough to trigger trade');
+        return 'fgichangefail';
+    }
+    */
+   
     let tradeAmount;
     let isBuying;
     let inputMint;
@@ -159,6 +196,7 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         const price = Math.abs(usdcChange / solChange);
 
         console.log("Trade Successful!")
+        lastTradeTime.set(wallet.publicKey.toString(), Date.now());
         return {
             txId: jitoBundleResult.swapTxSignature,
             price,

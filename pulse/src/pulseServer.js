@@ -48,6 +48,9 @@ function ensureRequiredFiles() {
     DEVELOPER_TIP_PERCENTAGE: 0,
     MONITOR_MODE: false,
     DEVELOPER_MODE: false,
+    MIN_PROFIT_PERCENT: 0.2,
+    TRADE_COOLDOWN_MINUTES: 30,
+    MIN_SENTIMENT_CHANGE: 5,
 
     // PulseSurfer specific settings
     SENTIMENT_MULTIPLIERS: {

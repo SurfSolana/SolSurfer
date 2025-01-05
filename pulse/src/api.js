@@ -8,6 +8,9 @@ const { devLog } = require('./utils');
 const BASE_PRICE_URL = "https://api.jup.ag/price/v2?ids=";
 const BASE_SWAP_URL = "https://quote-api.jup.ag/v6";
 
+let lastFGIValue = null;
+let lastTradeTime = new Map();
+
 async function fetchFearGreedIndex() {
     try {
         const response = await axios.get('https://cfgi.io/solana-fear-greed-index/15m');
@@ -19,7 +22,16 @@ async function fetchFearGreedIndex() {
         if (seriesMatch) {
             const seriesNumber = parseInt(seriesMatch[1]);
             if (!isNaN(seriesNumber) && seriesNumber >= 0 && seriesNumber <= 100) {
-                return seriesNumber;
+                const currentFGI = seriesNumber;
+                
+                // Store last value before updating
+                const returnValue = currentFGI;
+                lastFGIValue = currentFGI;
+                console.log('Current Fear and Greed Index:', currentFGI);
+                console.log('Last Fear and Greed Index:', lastFGIValue);
+                console.log('Returning Fear and Greed Index:', returnValue);
+
+                return returnValue;
             }
         }
 
@@ -29,6 +41,16 @@ async function fetchFearGreedIndex() {
         console.error('Error fetching Fear and Greed Index:', error.message);
         return 50; // Default to neutral in case of error
     }
+}
+
+function isFGIChangeSignificant(currentFGI, settings) {
+    console.log('lastFGIValue:', lastFGIValue);
+    if (lastFGIValue === null) {
+        return true; // First trade is always significant
+    }
+
+    const change = Math.abs(currentFGI - lastFGIValue);
+    return change >= settings.MIN_SENTIMENT_CHANGE;
 }
 
 function getSentiment(data) {
@@ -176,5 +198,7 @@ module.exports = {
     getQuote,
     getFeeAccountAndSwapTransaction,
     BASE_PRICE_URL,
-    BASE_SWAP_URL
+    BASE_SWAP_URL,
+    isFGIChangeSignificant,
+    lastFGIValue
 };

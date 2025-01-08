@@ -193,13 +193,29 @@ class OrderBook {
     }
 
     findOldestMatchingTrade(direction) {
-        // We want to find trades of the SAME direction to close
+        // Sort all open trades of matching direction by timestamp
         const openTrades = this.trades
             .filter(trade => trade.status === 'open' && trade.direction === direction)
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-    
-        devLog(`Finding ${direction} trades to close:`, openTrades);
-        return openTrades[0] || null;
+            
+        devLog(`Finding ${direction} trades to close, checking ${openTrades.length} trades`);
+        
+        // Check each trade in chronological order
+        for (const trade of openTrades) {
+            const currentPrice = trade.direction === 'buy' ? 
+                trade.price * (1 + this.readSettings().MIN_PROFIT_PERCENT/100) :
+                trade.price * (1 - this.readSettings().MIN_PROFIT_PERCENT/100);
+                
+            const profitCheck = this.checkTradeProfitability(trade.id, currentPrice);
+            if (profitCheck.canClose) {
+                devLog(`Found profitable trade to close:`, trade);
+                return trade;
+            } else {
+                devLog(`Trade ${trade.id} not ready: ${profitCheck.reason}`);
+            }
+        }
+        
+        return null;
     }
 
     checkTradeProfitability(tradeId, currentPrice) {

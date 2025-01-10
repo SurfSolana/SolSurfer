@@ -1,7 +1,7 @@
 const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL, fetchFearGreedIndex, isFGIChangeSignificant } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
 const { readSettings } = require('./pulseServer');
-const { attemptRPCFailover, devLog } = require('./utils');
+const { attemptRPCFailover, devLog, formatTime } = require('./utils');
 const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram, TransactionInstruction } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');

@@ -18,3 +18,4 @@ user/*
 !/user/start.js
 !/user/.gitkeep
 !/user/.env.example
+pulse/src/backtest-results.json

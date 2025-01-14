@@ -157,7 +157,8 @@ async function hasOpposingTrades(sentiment) {
 
     // Look for opposing trades based on sentiment
     const oldestMatchingTrade = orderBook.findOldestMatchingTrade(
-        isFearSentiment ? "sell" : "buy"
+        isFearSentiment ? "sell" : "buy",
+        currentPrice
     );
     
     return oldestMatchingTrade !== null;
@@ -215,7 +216,7 @@ async function main() {
             let success = false;
         
             // Check for closing trades
-            const hasPositionToClose = await hasOpposingTrades(sentiment);
+            const hasPositionToClose = await hasOpposingTrades(sentiment, currentPrice);
         
             if (hasPositionToClose) {
                 // Closing Trade Loop

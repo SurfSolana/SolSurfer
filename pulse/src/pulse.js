@@ -96,18 +96,12 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
     }
 
     const oldestMatchingTrade = orderBook.findOldestMatchingTrade(
-        isFearSentiment ? "sell" : "buy"
+        isFearSentiment ? "sell" : "buy",
+        currentPrice
     );
     
     if (oldestMatchingTrade) {
         devLog(`Found opposing trade to close:`, oldestMatchingTrade);
-        
-        // Check profitability before executing the trade
-        const profitCheck = orderBook.checkTradeProfitability(oldestMatchingTrade.id, currentPrice);
-        if (!profitCheck.canClose) {
-            console.log(`Trade not ready to close: ${profitCheck.reason}`);
-            return null;
-        }
         
         try {
             const isClosingBuy = oldestMatchingTrade.direction === 'sell';

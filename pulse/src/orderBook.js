@@ -192,7 +192,7 @@ class OrderBook {
         }, { solAmount: 0, value: 0 });
     }
 
-    findOldestMatchingTrade(direction) {
+    findOldestMatchingTrade(direction, currentPrice) {
         // Sort all open trades of matching direction by timestamp
         const openTrades = this.trades
             .filter(trade => trade.status === 'open' && trade.direction === direction)
@@ -200,21 +200,38 @@ class OrderBook {
             
         devLog(`Finding ${direction} trades to close, checking ${openTrades.length} trades`);
         
-        // Check each trade in chronological order
+        if (openTrades.length === 0) {
+            devLog('No open trades found matching direction:', direction);
+            return null;
+        }
+
+        // Check each trade in chronological order for profitability
         for (const trade of openTrades) {
-            const currentPrice = trade.direction === 'buy' ? 
-                trade.price * (1 + this.readSettings().MIN_PROFIT_PERCENT/100) :
-                trade.price * (1 - this.readSettings().MIN_PROFIT_PERCENT/100);
-                
-            const profitCheck = this.checkTradeProfitability(trade.id, currentPrice);
-            if (profitCheck.canClose) {
-                devLog(`Found profitable trade to close:`, trade);
+            // Calculate actual profit percentage based on current market price
+            const profitPercent = trade.direction === 'buy' ? 
+                ((currentPrice - trade.price) / trade.price) * 100 :
+                ((trade.price - currentPrice) / trade.price) * 100;
+
+            devLog(`Checking trade from ${trade.timestamp}:
+                Direction: ${trade.direction}
+                Entry Price: $${trade.price}
+                Current Price: $${currentPrice}
+                Profit: ${profitPercent.toFixed(2)}%
+                Min Required: ${this.readSettings().MIN_PROFIT_PERCENT}%`);
+
+            if (profitPercent >= this.readSettings().MIN_PROFIT_PERCENT) {
+                devLog(`Found profitable trade to close:
+                    Trade ID: ${trade.id}
+                    Profit: ${profitPercent.toFixed(2)}%
+                    Amount: ${trade.solAmount} SOL
+                    Value: $${trade.value}`);
                 return trade;
             } else {
-                devLog(`Trade ${trade.id} not ready: ${profitCheck.reason}`);
+                devLog(`Trade ${trade.id} not profitable enough: ${profitPercent.toFixed(2)}% < ${this.readSettings().MIN_PROFIT_PERCENT}%`);
             }
         }
         
+        devLog(`No profitable trades found matching ${direction} direction`);
         return null;
     }
 

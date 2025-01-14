@@ -5,7 +5,6 @@ const { attemptRPCFailover, devLog, formatTime } = require('./utils');
 const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram, TransactionInstruction } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
-const WebSocket = require('ws');
 const fetch = require('cross-fetch');
 const fs = require('fs');
 const path = require('path');
@@ -577,34 +576,29 @@ function getRandomTipAccount() {
 }
 
 async function jitoTipCheck() {
-    const JitoTipWS = 'ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream';
-    return new Promise((resolve, reject) => {
-        const tipws = new WebSocket(JitoTipWS);
-        tipws.on('open', function open() { });
-        tipws.on('message', function incoming(data) {
-            const str = data.toString();
-            try {
-                const json = JSON.parse(str);
-                const emaPercentile50th = json[0].ema_landed_tips_50th_percentile;
-                if (emaPercentile50th !== null) {
-                    tipws.close();
-                    resolve(emaPercentile50th);
-                } else {
-                    reject(new Error('50th percentile is null'));
-                }
-            } catch (err) {
-                reject(err);
-            }
+    try {
+        const response = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', {
+            timeout: 21000
         });
-        tipws.on('error', function error(err) {
-            console.error('WebSocket error:', err);
-            reject(err);
-        });
-        setTimeout(() => {
-            tipws.close();
-            reject(new Error('Timeout'));
-        }, 21000);
-    });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (!Array.isArray(data) || !data[0] || data[0].ema_landed_tips_50th_percentile === null) {
+            throw new Error('Invalid tip floor data structure');
+        }
+
+        const emaPercentile50th = data[0].ema_landed_tips_50th_percentile;
+        devLog('Current Jito tip floor (50th EMA):', emaPercentile50th);
+        return emaPercentile50th;
+
+    } catch (error) {
+        console.error('Error fetching Jito tip floor:', error);
+        throw error;
+    }
 }
 
 async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, isBuying) {

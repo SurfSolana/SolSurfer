@@ -12,18 +12,6 @@
     --trade-bg: #3A3A4C;
 }
 
-/* Wave Theme */
-.wave-theme {
-    --primary: #00C2FF;
-    --secondary: #FF6B00;
-    --primary-dark: #0091C2;
-    --secondary-light: #FFB27F;
-    --background: #1A2634;
-    --card-bg: #243446;
-    --text: #FFFFFF;
-    --trade-bg: #2F445A;
-}
-
 body {
     font-family: 'Fira Code', monospace;
     line-height: 1.6;
@@ -316,12 +304,6 @@ button:hover {
     background: linear-gradient(to right, #FF4136, #FF851B, #FFDC00, #2ECC40, #0074D9);
 }
 
-.wave-theme #fgiGauge {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(to right, #FF6B00, #FFB27F, #FFDC00, #00C2FF, #0091C2);
-}
-
 #fgiPointer {
     position: absolute;
     top: -5px;
@@ -365,14 +347,6 @@ button:hover {
 }
 
 .pulse-theme .trade-sell {
-    border-left: 4px solid var(--primary) !important;
-}
-
-.wave-theme .trade-buy {
-    border-left: 4px solid var(--secondary) !important;
-}
-
-.wave-theme .trade-sell {
     border-left: 4px solid var(--primary) !important;
 }
 
@@ -523,12 +497,6 @@ button:hover {
     border: 1px solid var(--primary);
     border-radius: 4px;
     box-sizing: border-box;
-}
-
-.wave-settings {
-    border-top: 1px solid var(--primary);
-    margin-top: 20px;
-    padding-top: 20px;
 }
 
 .blur {

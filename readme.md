@@ -8,7 +8,7 @@
 
 [Join our Discord community](https://discord.gg/dpzudaBwSa) to discuss SolSurfer, get support, and stay updated on the latest developments.
 
-SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC trading on the Solana blockchain. What sets our bot apart from AI trading bots is our transparent approach - combining targeted machine learning for performance optimization with clear, understandable trading strategies. Our dual trading approaches leverage Fear and Greed Index analysis with ML-optimized parameters, giving you the best of both worlds: advanced technology with complete clarity on how your trades are executed.
+SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC trading on the Solana blockchain. What sets our bot apart from AI trading bots is our transparent approach - combining targeted machine learning for performance optimization with clear, understandable trading strategies. Our trading approach leverages Fear and Greed Index analysis with ML-optimized parameters, giving you the best of both worlds: advanced technology with complete clarity on how your trades are executed.
 
 ## Features 🚀
 
@@ -23,16 +23,14 @@ SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC 
 ## Contents 📑
 
 - [Features](#features-)
-- [Trading Strategies](#trading-strategies-)
-  - [PulseSurfer: Sentiment Trading](#1-pulsesurfer-sentiment-trading)
-  - [WaveSurfer: Momentum Trading](#2-wavesurfer-momentum-trading)
+- [Trading Strategy](#trading-strategy-)
+  - [PulseSurfer: Sentiment Trading](#pulsesurfer-sentiment-trading)
 - [Quick Start](#quick-start-)
 - [Full Setup](#full-setup-%EF%B8%8F)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Running SolSurfer](#running-solsurfer-%EF%B8%8F)
 - [Dashboard Features](#dashboard-features-)
-- [Choose Your Strategy](#choose-your-strategy-)
 - [Risk Disclaimer](#risk-disclaimer-%EF%B8%8F)
 - [License](#license-)
 - [Contributing](#contributing-)
@@ -83,9 +81,9 @@ node user/start.js
 chmod +x start_surfer.sh
 ```
 
-## Trading Strategies 📊
+## Trading Strategy 📊
 
-### 1. PulseSurfer: Sentiment Trading
+### PulseSurfer: Sentiment Trading
 Direct Sentiment Trading:
 - Buys in fear markets
 - Sells in greed periods
@@ -95,19 +93,6 @@ Position Sizing:
 - Position sizing based on sentiment
 - Configurable multipliers for each sentiment level
 
-### 2. WaveSurfer: Momentum Trading
-Streak Building:
-- Tracks consecutive sentiment readings
-- Requires minimum streak threshold (default: 5)
-
-Trade Execution:
-- Trades on neutral return after streak
-- Buys after Fear streaks
-- Sells after Greed streaks
-
-Position Sizing:
-- Trade size set by Trade Multiplier
-- Default is 15% of selling token balance
 
 ## Full Setup 🛠️
 
@@ -141,7 +126,6 @@ Note: For Mac/Linux, make the file executable first:
 chmod +x start_surfer.sh
 ```
 
-Select your trading strategy (1: PulseSurfer or 2: WaveSurfer)
 
 Edit the `.env` file (found in user folder) with your details:
 ```
@@ -176,10 +160,7 @@ Configure trading parameters in `settings.json` or via the web interface:
     "FEAR": 0.03,
     "GREED": 0.03,
     "EXTREME_GREED": 0.05
-  },
-  
-  "STREAK_THRESHOLD": 5,
-  "TRADE_MULTIPLIER": 15
+  }
 }
 ```
 
@@ -195,10 +176,6 @@ Mac/Linux: start_surfer.sh
 
 ```node user/start.js```
 
-Select your trading strategy:
-1. PulseSurfer (direct sentiment trading)
-2. WaveSurfer (momentum trading)
-
 Access the web interface:
 - Local: http://localhost:3000
 - Remote: Port forward your selected port and use your machine's Public IPv4 Address
@@ -213,20 +190,6 @@ The web interface provides:
 - Portfolio metrics
 - Trade notifications
 - Analytics
-
-## Choose Your Strategy 🤔
-
-**PulseSurfer**: Better for:
-- Active trading
-- Quick market responses
-- Higher trading frequency
-- Short-term trading
-
-**WaveSurfer**: Better for:
-- Trend following
-- Reduced trading frequency
-- Momentum-based trades
-- Passive approach
 
 ## Risk Disclaimer ⚠️
 

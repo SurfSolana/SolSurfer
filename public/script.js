@@ -41,7 +41,6 @@ let sentimentBoundaries = {
     EXTREME_GREED: 80
 };
 
-let serverType = null;
 let serverName = null;
 let priceUnit = 'usd';
 let lastTradingData;
@@ -174,29 +173,39 @@ function updateTradingData(data) {
             { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
             { label: "Estimated APY (Compared to Holding 100% SOL)", value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
         );
+    }
 
-        if (serverType === 'wave') {
-            // Format sentiment streak - handle both string and object cases
-            let streakDisplay = 'No streak';
-            if (data.sentimentStreak) {
-                if (typeof data.sentimentStreak === 'object') {
-                    // If it's an object with fgi values, show those
-                    streakDisplay = data.sentimentStreak.values || 'No streak';
-                } else if (Array.isArray(data.sentimentStreak)) {
-                    // If it's an array, join the values
-                    streakDisplay = data.sentimentStreak.join(', ');
-                } else {
-                    // If it's a simple value, show it directly
-                    streakDisplay = data.sentimentStreak.toString();
-                }
-            }
+    if (data.orderbook) {
+        // Update Performance Metrics
+        document.getElementById('winRate').textContent = 
+            `${data.orderbook.winRate ? data.orderbook.winRate.toFixed(1) : '0.0'}%`;
+        document.getElementById('totalTrades').textContent = 
+            data.orderbook.totalTrades || '0';
+        document.getElementById('openTrades').textContent = 
+            data.orderbook.openTrades || '0';
+        document.getElementById('closedTrades').textContent = 
+            data.orderbook.closedTrades || '0';
 
-            dataPoints.push(
-                { label: "Current Sentiment Streak", value: streakDisplay, icon: "fa-solid fa-trophy" },
-                { label: "Streak Threshold", value: formatValue(data.streakThreshold), icon: "fa-solid fa-bullseye" },
-                { label: "Average Streak Length", value: formatValue(data.streakStats?.averageLength), icon: "fa-solid fa-bars-progress" },
-                { label: "Total Streaks", value: formatValue(data.streakStats?.totalStreaks), icon: "fa-solid fa-chart-line" }
-            );
+        // Update Financial Overview
+        const totalPnlElement = document.getElementById('totalPnl');
+        const unrealizedPnlElement = document.getElementById('unrealizedPnl');
+        const volumeElement = document.getElementById('totalVolume');
+        const avgSizeElement = document.getElementById('avgTradeSize');
+
+        totalPnlElement.textContent = `$${data.orderbook.totalRealizedPnl ? data.orderbook.totalRealizedPnl.toFixed(4) : '0.00'}`;
+        unrealizedPnlElement.textContent = `$${data.orderbook.totalUnrealizedPnl ? data.orderbook.totalUnrealizedPnl.toFixed(4) : '0.00'}`;
+        volumeElement.textContent = `$${data.orderbook.totalVolume ? data.orderbook.totalVolume.toFixed(4) : '0.00'}`;
+        avgSizeElement.textContent = data.orderbook.totalTrades > 0 
+            ? `$${(data.orderbook.totalVolume / data.orderbook.totalTrades).toFixed(4)}` 
+            : '$0.00';
+
+        // Add color classes
+        totalPnlElement.className = `data-value ${data.orderbook.totalRealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+        unrealizedPnlElement.className = `data-value ${data.orderbook.totalUnrealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+
+        // Update orderbook table if trades data is present
+        if (data.orderbook.trades) {
+            updateOrderbookTable(data.orderbook.trades);
         }
     }
 
@@ -264,30 +273,13 @@ function updateFormValues(params) {
         document.getElementById('greedMultiplier').value = params.SENTIMENT_MULTIPLIERS.GREED;
         document.getElementById('extremeGreedMultiplier').value = params.SENTIMENT_MULTIPLIERS.EXTREME_GREED;
     }
-	document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
-	document.getElementById('devTip').value = params.DEVELOPER_TIP_PERCENTAGE;
+    document.getElementById('monthlyCost').value = params.USER_MONTHLY_COST;
+    document.getElementById('devTip').value = params.DEVELOPER_TIP_PERCENTAGE;
 
-    // Handle Wave-specific parameters only if they exist
-    if (serverType === 'wave') {
-        if (params.STREAK_THRESHOLD !== undefined) {
-            const streakThreshold = document.getElementById('streakThreshold');
-            if (streakThreshold) {
-                streakThreshold.value = params.STREAK_THRESHOLD;
-            }
-        }
-        if (params.TRADE_MULTIPLIER !== undefined) {
-            const tradeMultiplier = document.getElementById('tradeMultiplier');
-            if (tradeMultiplier) {
-                tradeMultiplier.value = params.TRADE_MULTIPLIER;
-            }
-        }
-    }
-	updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
-	if (serverType === 'pulse') {
-            createFearGreedChart(params);
-        }
-	initializeLockButton();
-	initializeSlider(params, serverType, isLocked);
+    updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
+    createFearGreedChart(params);
+    initializeLockButton();
+    initializeSlider(params, true, isLocked);
 }
 
 function updateTradeList(trades) {
@@ -408,7 +400,6 @@ socket.on('connect', () => {
 
 socket.on('serverIdentification', (serverInfo) => {
     console.log('Connected to server:', serverInfo);
-    serverType = serverInfo.type;
     serverName = serverInfo.name;
 
     // Update title and header
@@ -417,25 +408,12 @@ socket.on('serverIdentification', (serverInfo) => {
     if (headerElement) {
         headerElement.textContent = `> ${serverName} Fear and Greed Trader`;
     }
-    document.body.className = serverInfo.type === 'wave' ? 'wave-theme' : 'pulse-theme';
+    document.body.className = 'pulse-theme';
 
-    // Configure UI based on server type
-    if (serverType === 'wave') {
-        // Show Wave-specific elements and hide Pulse elements
-        document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'block');
-        document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'none');
-        document.getElementById('chartContainer').style.display = 'none';
-    } else {
-        // Hide Wave-specific elements and show Pulse elements
-        document.querySelectorAll('.wave-only').forEach(el => el.style.display = 'none');
-        document.querySelectorAll('.pulse-only').forEach(el => el.style.display = 'block');
-    }
-
-    // Update version display with bot identifier
+    // Update version display
     const versionElement = document.getElementById('versionNumber');
     if (versionElement) {
-        const prefix = serverType === 'wave' ? 'Wave v' : 'Pulse v';
-        versionElement.textContent = `${prefix}${serverInfo.version}`;
+        versionElement.textContent = `Pulse v${serverInfo.version}`;
     }
 });
 
@@ -477,37 +455,28 @@ socket.on('tradingUpdate', (data) => {
 });
 
 export function updateParams(e, sliderBoundaries) {
-
     if (e && typeof e.preventDefault === 'function') {
         e.preventDefault();
     }
-	
-	if (!sliderBoundaries) {
+    
+    if (!sliderBoundaries) {
         sliderBoundaries = sentimentBoundaries;
     }
-	
+    
     const formData = new FormData(paramForm);
 
-    // Common parameters
     const params = {
         SENTIMENT_BOUNDARIES: sliderBoundaries,
-		SENTIMENT_MULTIPLIERS: {}
+        SENTIMENT_MULTIPLIERS: {
+            EXTREME_FEAR: parseFloat(formData.get('extremeFearMultiplier')),
+            FEAR: parseFloat(formData.get('fearMultiplier')),
+            GREED: parseFloat(formData.get('greedMultiplier')),
+            EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
+        }
     };
-	
-	params.SENTIMENT_MULTIPLIERS = {
-        EXTREME_FEAR: parseFloat(formData.get('extremeFearMultiplier')),
-        FEAR: parseFloat(formData.get('fearMultiplier')),
-        GREED: parseFloat(formData.get('greedMultiplier')),
-        EXTREME_GREED: parseFloat(formData.get('extremeGreedMultiplier'))
-    };
-	
-    // Add version-specific parameters
-    if (serverType === 'wave') {
-        params.STREAK_THRESHOLD = parseInt(formData.get('streakThreshold'));
-        params.TRADE_MULTIPLIER = parseFloat(formData.get('tradeMultiplier'));
-    }
-	paramsApi(params);
-	updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
+
+    paramsApi(params);
+    updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
 }
 
 function paramsApi(params) {
@@ -522,9 +491,7 @@ function paramsApi(params) {
         .then(data => {
             console.log('Server response:', data);
             showFeedback('Parameters updated successfully.', 'success');
-			if (serverType === 'pulse') {
             createFearGreedChart(params);
-        }
         })
         .catch((error) => {
             console.error('Error:', error);

@@ -45,18 +45,16 @@ function ensureRequiredFiles() {
     USER_MONTHLY_COST: 0,
     DEVELOPER_TIP_PERCENTAGE: 0,
     MONITOR_MODE: false,
+    DEVELOPER_MODE: false,
+    MIN_PROFIT_PERCENT: 0.2,
+    TRADE_COOLDOWN_MINUTES: 30,
 
-    // PulseSurfer specific settings
     SENTIMENT_MULTIPLIERS: {
       EXTREME_FEAR: 0.04,
       FEAR: 0.02,
       GREED: 0.02,
       EXTREME_GREED: 0.04
-    },
-
-    // WaveSurfer specific settings
-    STREAK_THRESHOLD: 4,
-    TRADE_MULTIPLIER: 10  // Percentage of balance to trade
+    }
   };
 
   if (!fs.existsSync(settingsPath)) {

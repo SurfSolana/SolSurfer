@@ -28,10 +28,14 @@ const tooltipDefinitions = {
     'Average Sell Price': "Average price received when selling SOL",
     'Program Run Time (Hours/Mins/Seconds)': "Total time elapsed since trading began",
     'Estimated APY (Compared to Holding 100% SOL)': "Estimated annual return compared to holding 100% SOL, includes trading fees and costs",
-    'Current Sentiment Streak': "Current sequence of similar market sentiment readings",
-    'Streak Threshold': "Minimum consecutive sentiment readings needed to trigger a trade",
-    'Average Streak Length': "Average duration of completed sentiment streaks",
-    'Total Streaks': "Total number of completed sentiment streaks since trading began"
+    'Win Rate': "Percentage of closed trades that resulted in profit",
+    'Total Trades': "Total number of trades executed since trading began",
+    'Open Positions': "Number of currently active trades that haven't been closed",
+    'Closed Trades': "Number of completed trades that have been fully settled",
+    'Total PnL': "Total realized profit or loss from all closed trades",
+    'Unrealized PnL': "Current estimated profit or loss of open positions based on current market price",
+    'Total Volume': "Total value of all trades executed in USD",
+    'Avg Trade Size': "Average dollar value of individual trades"
 };
 
 let sentimentBoundaries = {
@@ -77,10 +81,9 @@ function login() {
         .catch(error => console.error('Error:', error));
 }
 
-	// Event listener for Enter key press
-	document.getElementById('passwordInput').addEventListener('keypress', function(event) {
+document.getElementById('passwordInput').addEventListener('keypress', function(event) {
     if (event.key === 'Enter') {
-        login(); // Trigger the login on Enter press
+        login();
     }
 });
 
@@ -97,18 +100,14 @@ function autoLogin(password) {
             if (data.success) {
                 showMainContent();
                 fetchInitialData();
-            } 
-			// No error handling for incorrect password here, so the user can keep typing
+            }
         })
         .catch(error => console.error('Error:', error));
 }
 
-	// Event listener for automatic login when a valid password is typed
-	document.getElementById('passwordInput').addEventListener('input', function(event) {
+document.getElementById('passwordInput').addEventListener('input', function(event) {
     const password = event.target.value;
-    
-    // Send the password to the server as it's typed
-    if (password.length > 0) { // Avoid sending empty requests
+    if (password.length > 0) {
         autoLogin(password);
     }
 });
@@ -124,15 +123,10 @@ function authenticatedFetch(url, options = {}) {
         });
 }
 
-function togglePriceUnit() {
-    priceUnit = priceUnit === 'usd' ? 'eur' : 'usd';
-    updateTradingData(lastTradingData);
-}
-
 function updateTradingData(data) {
     lastTradingData = data;
-    const priceLabel = priceUnit === 'usd' ? '$' : '€';
-    const price = priceUnit === 'usd' ? data?.price?.usd : data?.price?.eur;
+    const priceLabel = '$';
+    const price = data?.price?.usd
 
     timestampElement.textContent = data?.timestamp || 'Please Wait';
 
@@ -140,16 +134,13 @@ function updateTradingData(data) {
         if (value === null || value === undefined) return 'Please Wait';
         if (value === 'N/A') return 'Please Wait';
 
-        // Handle array or object values
         if (typeof value === 'object') {
             if (Array.isArray(value)) {
                 return value.join(', ');
             }
-            // For streakStats or other objects, check if we need to access specific properties
             if (value.fgi !== undefined) {
                 return value.fgi.toString();
             }
-            // For other objects, return N/A to avoid [object Object]
             return 'N/A';
         }
 
@@ -158,7 +149,6 @@ function updateTradingData(data) {
 
     const dataPoints = [];
 
-    // Only add points if we have valid data
     if (data) {
         dataPoints.push(
             { label: "Portfolio Value", value: formatValue(data.portfolioValue?.[priceUnit], priceLabel), icon: "fa-solid fa-wallet" },
@@ -176,7 +166,6 @@ function updateTradingData(data) {
     }
 
     if (data.orderbook) {
-        // Update Performance Metrics
         document.getElementById('winRate').textContent = 
             `${data.orderbook.winRate ? data.orderbook.winRate.toFixed(1) : '0.0'}%`;
         document.getElementById('totalTrades').textContent = 
@@ -186,7 +175,6 @@ function updateTradingData(data) {
         document.getElementById('closedTrades').textContent = 
             data.orderbook.closedTrades || '0';
 
-        // Update Financial Overview
         const totalPnlElement = document.getElementById('totalPnl');
         const unrealizedPnlElement = document.getElementById('unrealizedPnl');
         const volumeElement = document.getElementById('totalVolume');
@@ -199,17 +187,14 @@ function updateTradingData(data) {
             ? `$${(data.orderbook.totalVolume / data.orderbook.totalTrades).toFixed(4)}` 
             : '$0.00';
 
-        // Add color classes
         totalPnlElement.className = `data-value ${data.orderbook.totalRealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
         unrealizedPnlElement.className = `data-value ${data.orderbook.totalUnrealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
 
-        // Update orderbook table if trades data is present
         if (data.orderbook.trades) {
             updateOrderbookTable(data.orderbook.trades);
         }
     }
 
-    // Add error handling for DOM manipulation
     try {
         tradingDataElement.innerHTML = dataPoints.map(point => `
             <div class="data-item ${point.fullWidth ? 'full-width' : ''}">
@@ -234,6 +219,46 @@ function updateTradingData(data) {
         console.error('Error updating trading data UI:', error);
         tradingDataElement.innerHTML = '<div>Error displaying trading data. Please refresh the page.</div>';
     }
+}
+
+function updateOrderbookTable(trades) {
+    const tbody = document.getElementById('orderbookBody');
+    if (!tbody) return;
+
+    const sortedTrades = trades.sort((a, b) => {
+        const dateA = new Date(a.timestamp);
+        const dateB = new Date(b.timestamp);
+        return dateB - dateA;
+    });
+
+    const limitedTrades = sortedTrades.slice(0, 20);
+
+    tbody.innerHTML = limitedTrades.map(trade => `
+        <tr>
+            <td>${trade.timestamp}</td>
+            <td>
+                <span class="trade-badge ${trade.direction === 'buy' ? 'trade-type-buy' : 'trade-type-sell'}">
+                    ${trade.direction.toUpperCase()}
+                </span>
+            </td>
+            <td>
+                <span class="trade-badge ${trade.status === 'open' ? 'trade-status-open' : 'trade-status-closed'}">
+                    ${trade.status.toUpperCase()}
+                </span>
+            </td>
+            <td>$${trade.price.toFixed(2)}</td>
+            <td>${trade.solAmount.toFixed(6)} SOL</td>
+            <td>$${trade.value.toFixed(2)}</td>
+            <td class="${trade.status === 'open' ? 
+                (trade.upnl >= 0 ? 'pnl-positive' : 'pnl-negative') : 
+                (trade.realizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative')}">
+                $${trade.status === 'open' ? 
+                    trade.upnl.toFixed(2) : 
+                    trade.realizedPnl.toFixed(2)}
+            </td>
+            <td>${trade.closePrice ? `$${trade.closePrice.toFixed(2)}` : '-'}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="8" class="empty-state">No trades found</td></tr>';
 }
 
 function updateFGI(value) {
@@ -279,7 +304,7 @@ function updateFormValues(params) {
     updateSentimentBoundaries(params.SENTIMENT_BOUNDARIES);
     createFearGreedChart(params);
     initializeLockButton();
-    initializeSlider(params, true, isLocked);
+    initializeSlider(params, isLocked);
 }
 
 function updateTradeList(trades) {
@@ -318,22 +343,29 @@ function addTrade(trade) {
 
     const tradeItem = document.createElement('li');
     const tradeDate = new Date(trade.timestamp);
-    const formattedTime = tradeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    
+    const dayName = days[tradeDate.getDay()];
+    const day = String(tradeDate.getDate()).padStart(2, '0');
+    const month = months[tradeDate.getMonth()];
+    const time = tradeDate.toTimeString().split(' ')[0];
+    
+    const formattedDate = `${dayName}, ${day}/${month}, ${time}`;
 
     let tradeContent;
     if (trade.success === false) {
-        tradeContent = `${formattedTime}: ${trade.sentiment} transaction failed, click for details`;
+        tradeContent = `${formattedDate}: ${trade.sentiment} transaction failed, click for details`;
         tradeItem.classList.add('trade-failed');
     } else {
         const action = trade.type;
         const amount = parseFloat(trade.amount).toFixed(6);
         const price = parseFloat(trade.price).toFixed(2);
         const unit = 'SOL';
-        tradeContent = `${formattedTime}: ${action} ${amount} ${unit} at $${price}`;
+        tradeContent = `${formattedDate}: ${action} ${amount} ${unit} at $${price}`;
         tradeItem.classList.add(action.toLowerCase() === 'bought' ? 'trade-buy' : 'trade-sell');
     }
-
-    console.log('Trade content:', tradeContent);
 
     const tradeLink = document.createElement('a');
     tradeLink.href = trade.txUrl || '#';
@@ -341,13 +373,11 @@ function addTrade(trade) {
     tradeLink.textContent = tradeContent;
 
     tradeItem.appendChild(tradeLink);
-
     tradeListElement.insertBefore(tradeItem, tradeListElement.firstChild);
+    
     if (tradeListElement.children.length > 10) {
         tradeListElement.removeChild(tradeListElement.lastChild);
     }
-
-    console.log('Trade added to list');
 }
 
 function fetchRecentTrades() {
@@ -385,7 +415,6 @@ function fetchInitialData() {
         });
 }
 
-// Initial check
 authenticatedFetch('/api/initial-data')
     .then(() => {
         showMainContent();
@@ -402,7 +431,6 @@ socket.on('serverIdentification', (serverInfo) => {
     console.log('Connected to server:', serverInfo);
     serverName = serverInfo.name;
 
-    // Update title and header
     document.title = `${serverName} v${serverInfo.version}`;
     const headerElement = document.querySelector('#botTitle');
     if (headerElement) {
@@ -410,7 +438,6 @@ socket.on('serverIdentification', (serverInfo) => {
     }
     document.body.className = 'pulse-theme';
 
-    // Update version display
     const versionElement = document.getElementById('versionNumber');
     if (versionElement) {
         versionElement.textContent = `Pulse v${serverInfo.version}`;
@@ -431,11 +458,9 @@ socket.on('tradingUpdate', (data) => {
         const mostRecentTrade = data.recentTrades[0];
         console.log('Most recent trade:', mostRecentTrade);
 
-        // Get all current trades in the list
         const currentTradeList = document.querySelector('#tradeList');
         const existingTrades = currentTradeList?.querySelectorAll('li a');
 
-        // Check if this is a duplicate trade by comparing transaction URLs with all existing trades
         let isDuplicate = false;
         if (existingTrades && mostRecentTrade.txUrl) {
             isDuplicate = Array.from(existingTrades).some(trade => trade.href === mostRecentTrade.txUrl);
@@ -444,7 +469,6 @@ socket.on('tradingUpdate', (data) => {
             }
         }
 
-        // Only add the trade if it's not a duplicate
         if (!isDuplicate) {
             console.log('Trade to add:', mostRecentTrade);
             addTrade(mostRecentTrade);
@@ -465,6 +489,7 @@ export function updateParams(e, sliderBoundaries) {
     
     const formData = new FormData(paramForm);
 
+    console.log('Slider Boundaries:', sliderBoundaries);
     const params = {
         SENTIMENT_BOUNDARIES: sliderBoundaries,
         SENTIMENT_MULTIPLIERS: {
@@ -522,10 +547,6 @@ function restartTrading() {
         });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    fetchRecentTrades();
-});
-
 function showFeedback(message, type) {
     feedbackElement.textContent = message;
     feedbackElement.className = type;
@@ -535,55 +556,40 @@ function showFeedback(message, type) {
     }, 5000);
 }
 
-// Function to add the toggle button next to the "Current Trading Data" title
-function addToggleButton() {
-    const cardHeader = document.querySelector('.card:nth-child(2) h2'); // Select the second card's header
-    if (!cardHeader.querySelector('.price-toggle')) {
-        const toggleButton = document.createElement('button');
-        toggleButton.textContent = 'Toggle USD/EUR';
-        toggleButton.className = 'price-toggle';
-        toggleButton.onclick = togglePriceUnit;
-        cardHeader.appendChild(toggleButton);
-    }
-}
-
 document.getElementById('settingsButton').addEventListener('click', function () {
     document.getElementById('settingsPopup').style.display = 'block';
-   
     document.getElementById('mainContent').classList.add('blur');
     document.body.classList.add('no-scroll');
 });
 
 document.getElementById('closePopupButton').addEventListener('click', function () {
     document.getElementById('settingsPopup').style.display = 'none';
-
     document.getElementById('mainContent').classList.remove('blur');
     document.body.classList.remove('no-scroll');
 });
 
 document.getElementById('monthlyCostButton').addEventListener('click', function() {
-	const monthlyCostInput = document.getElementById('monthlyCost');
-	const monthlyCost = parseFloat(monthlyCostInput.value);
-	
-	const params = {
-			USER_MONTHLY_COST: monthlyCost,
+    const monthlyCostInput = document.getElementById('monthlyCost');
+    const monthlyCost = parseFloat(monthlyCostInput.value);
+    
+    const params = {
+        USER_MONTHLY_COST: monthlyCost,
     }
-	paramsApi(params);
+    paramsApi(params);
 });
 
 document.getElementById('devTipButton').addEventListener('click', function() {
-	const devTipInput = document.getElementById('devTip');
-	const devTip = parseFloat(devTipInput.value);
-	
-	const params = {
-			DEVELOPER_TIP_PERCENTAGE: devTip,
+    const devTipInput = document.getElementById('devTip');
+    const devTip = parseFloat(devTipInput.value);
+    
+    const params = {
+        DEVELOPER_TIP_PERCENTAGE: devTip,
     }
-	paramsApi(params);
+    paramsApi(params);
 });
 
 function attachInputListeners() {
     const numberInputs = document.querySelectorAll('#paramForm input[type="number"]');
-
     numberInputs.forEach(input => {
         input.addEventListener('change', updateParams);
     });
@@ -604,31 +610,31 @@ function toggleLockedState(isLocked) {
 
 function initializeLockButton() {
     const lockToggleButton = document.getElementById("lockToggleButton");
-	const lockIcon = document.getElementById("lockIcon");
+    const lockIcon = document.getElementById("lockIcon");
 
-    // Set initial lock state based on isLocked
     toggleLockedState(isLocked);
     updateLockIcon(lockIcon, isLocked);
-	
-    // Toggle lock state on button click
+    
     lockToggleButton.addEventListener("click", function () {
         isLocked = !isLocked;
-		updateLockIcon(lockIcon, isLocked);
+        updateLockIcon(lockIcon, isLocked);
         toggleLockedState(isLocked);
-		updateSliderBehavior(slider, isLocked);
+        updateSliderBehavior(slider, isLocked);
     });
 }
 
 function updateLockIcon(lockIcon, isLocked) {
     if (isLocked) {
-        lockIcon.classList.remove("fa-lock-open"); // Remove the open lock icon
-        lockIcon.classList.add("fa-lock"); // Add the closed lock icon
+        lockIcon.classList.remove("fa-lock-open");
+        lockIcon.classList.add("fa-lock");
     } else {
-        lockIcon.classList.remove("fa-lock"); // Remove the closed lock icon
-        lockIcon.classList.add("fa-lock-open"); // Add the open lock icon
+        lockIcon.classList.remove("fa-lock");
+        lockIcon.classList.add("fa-lock-open");
     }
 }
 
-// Call this function once when the page loads
-document.addEventListener('DOMContentLoaded', addToggleButton);
+document.addEventListener('DOMContentLoaded', () => {
+    fetchRecentTrades();
+});
+
 document.addEventListener('DOMContentLoaded', attachInputListeners);

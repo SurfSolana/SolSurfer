@@ -3,9 +3,13 @@ const cheerio = require('cheerio');
 const fetch = require('cross-fetch');
 const { PublicKey } = require('@solana/web3.js');
 const { readSettings } = require('./pulseServer');
+const { devLog } = require('./utils');
 
 const BASE_PRICE_URL = "https://api.jup.ag/price/v2?ids=";
 const BASE_SWAP_URL = "https://quote-api.jup.ag/v6";
+
+let lastFGIValue = null;
+let lastTradeTime = new Map();
 
 async function fetchFearGreedIndex() {
     try {
@@ -18,7 +22,16 @@ async function fetchFearGreedIndex() {
         if (seriesMatch) {
             const seriesNumber = parseInt(seriesMatch[1]);
             if (!isNaN(seriesNumber) && seriesNumber >= 0 && seriesNumber <= 100) {
-                return seriesNumber;
+                const currentFGI = seriesNumber;
+                
+                // Store last value before updating
+                const returnValue = currentFGI;
+                lastFGIValue = currentFGI;
+                console.log('Current Fear and Greed Index:', currentFGI);
+                console.log('Last Fear and Greed Index:', lastFGIValue);
+                console.log('Returning Fear and Greed Index:', returnValue);
+
+                return returnValue;
             }
         }
 
@@ -28,6 +41,16 @@ async function fetchFearGreedIndex() {
         console.error('Error fetching Fear and Greed Index:', error.message);
         return 50; // Default to neutral in case of error
     }
+}
+
+function isFGIChangeSignificant(currentFGI, settings) {
+    console.log('lastFGIValue:', lastFGIValue);
+    if (lastFGIValue === null) {
+        return true; // First trade is always significant
+    }
+
+    const change = Math.abs(currentFGI - lastFGIValue);
+    return change >= settings.MIN_SENTIMENT_CHANGE;
 }
 
 function getSentiment(data) {
@@ -74,7 +97,7 @@ async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 5, retryDelay = 50
 				throw new Error('Invalid price value received');
 			}
 			
-			console.log(`Current ${TOKEN.slice(0, 8)}... Price: $${price.toFixed(2)}`);
+			devLog(`Current ${TOKEN.slice(0, 8)}... Price: $${price.toFixed(2)}`);
 			
             return parseFloat(price.toFixed(2));
 			
@@ -85,7 +108,7 @@ async function fetchPrice(BASE_PRICE_URL, TOKEN, maxRetries = 5, retryDelay = 50
                 throw new Error(`Failed to fetch price after ${maxRetries} attempts`);
             }
 
-            console.log(`Retrying in ${retryDelay / 1000} seconds...`);
+            devLog(`Retrying in ${retryDelay / 1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
     }
@@ -116,7 +139,7 @@ async function getQuote(inputMint, outputMint, tradeAmountLamports) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const quoteResponse = await response.json();
-        console.log('Quote response:', quoteResponse);  // Add this line for debugging
+        devLog('Quote response:', quoteResponse);  // Add this line for debugging
         return quoteResponse;
     } catch (error) {
         console.error('Error fetching quote:', error);
@@ -175,5 +198,7 @@ module.exports = {
     getQuote,
     getFeeAccountAndSwapTransaction,
     BASE_PRICE_URL,
-    BASE_SWAP_URL
+    BASE_SWAP_URL,
+    isFGIChangeSignificant,
+    lastFGIValue
 };

@@ -11,9 +11,12 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const session = require('express-session');
 const axios = require('axios');
-const { getVersion } = require('./utils');
+const { getVersion, devLog } = require('./utils');
 const { getWallet, getConnection } = require('./globalState');
 const { PublicKey } = require('@solana/web3.js');
+const OrderBook = require('./orderBook');
+
+let orderBook = new OrderBook();
 
 // Function to check and create necessary files
 function ensureRequiredFiles() {
@@ -30,12 +33,11 @@ function ensureRequiredFiles() {
     PORT=3000
     `;
     fs.writeFileSync(envPath, defaultEnvContent.trim());
-    console.log('.env file created. Please fill in the required values before running the application again.');
+    devLog('.env file created. Please fill in the required values before running the application again.');
     filesCreated = true;
   }
 
   const DEFAULT_SETTINGS = {
-    // Shared settings between both bots
     SENTIMENT_BOUNDARIES: {
       EXTREME_FEAR: 15,
       FEAR: 35,
@@ -48,7 +50,8 @@ function ensureRequiredFiles() {
     DEVELOPER_MODE: false,
     MIN_PROFIT_PERCENT: 0.2,
     TRADE_COOLDOWN_MINUTES: 30,
-
+    TRADE_SIZE_METHOD: "STRATEGIC",
+    STRATEGIC_PERCENTAGE: 2.5,
     SENTIMENT_MULTIPLIERS: {
       EXTREME_FEAR: 0.04,
       FEAR: 0.02,
@@ -59,7 +62,7 @@ function ensureRequiredFiles() {
 
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-    console.log('settings.json file created with default values.');
+    devLog('settings.json file created with default values.');
     filesCreated = true;
   }
 
@@ -142,7 +145,7 @@ function getMonitorMode() {
 function writeSettings(settings) {
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
-    console.log('Settings updated successfully.');
+    devLog('Settings updated successfully.');
   } catch (error) {
     console.error('Error writing settings.json:', error);
   }
@@ -208,10 +211,10 @@ if (fs.existsSync('/path/to/privkey.pem') && fs.existsSync('/path/to/cert.pem') 
 
   const credentials = { key: privateKey, cert: certificate, ca: ca };
   server = https.createServer(credentials, app);
-  console.log('HTTPS server created');
+  devLog('HTTPS server created');
 } else {
   server = http.createServer(app);
-  console.log('HTTP server created. Consider setting up HTTPS for production use.');
+  devLog('HTTP server created. Consider setting up HTTPS for production use.');
 }
 
 const io = socketIo(server, {
@@ -261,7 +264,7 @@ function addRecentTrade(trade) {
     if (lastTrade.timestamp === trade.timestamp &&
       lastTrade.amount === trade.amount &&
       lastTrade.price === trade.price) {
-      console.log("Duplicate trade detected, not adding to recent trades");
+      devLog("Duplicate trade detected, not adding to recent trades");
       return;
     }
   }
@@ -301,16 +304,40 @@ app.post('/api/restart', authenticate, (req, res) => {
   console.log("Restart trading request received");
   const wallet = getWallet();
   const connection = getConnection();
-  console.log("Wallet in restart endpoint:", wallet ? "Defined" : "Undefined");
-  console.log("Connection in restart endpoint:", connection ? "Defined" : "Undefined");
+  devLog("Wallet in restart endpoint:", wallet ? "Defined" : "Undefined");
+  devLog("Connection in restart endpoint:", connection ? "Defined" : "Undefined");
   paramUpdateEmitter.emit('restartTrading');
   res.json({ success: true, message: 'Trading restart initiated' });
+});
+
+// OrderBook API endpoints
+app.get('/api/orderbook-stats', authenticate, (req, res) => {
+  const stats = orderBook.getTradeStatistics();
+  res.json(stats);
+});
+
+app.get('/api/orderbook', authenticate, (req, res) => {
+  const trades = orderBook.trades.map(trade => ({
+    id: trade.id,
+    timestamp: trade.timestamp,
+    direction: trade.direction,
+    status: trade.status,
+    price: parseFloat(trade.price.toFixed(2)),
+    solAmount: parseFloat(trade.solAmount.toFixed(6)),
+    value: parseFloat(trade.value.toFixed(2)),
+    upnl: trade.status === 'open' ? parseFloat(trade.upnl.toFixed(2)) : null,
+    realizedPnl: trade.status === 'closed' ? parseFloat(trade.realizedPnl.toFixed(2)) : null,
+    closedAt: trade.closedAt || null,
+    closePrice: trade.closePrice ? parseFloat(trade.closePrice.toFixed(2)) : null,
+    txUrl: trade.id ? `https://solscan.io/tx/${trade.id}` : null
+  }));
+  res.json({ trades, stats: orderBook.getTradeStatistics() });
 });
 
 function saveState(state) {
   try {
     fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2));
-    console.log("State saved successfully.");
+    devLog("State saved successfully.");
   } catch (error) {
     console.error("Error saving state:", error);
   }
@@ -320,7 +347,17 @@ function loadState() {
   try {
     if (fs.existsSync(STATE_FILE_PATH)) {
       const data = fs.readFileSync(STATE_FILE_PATH, 'utf8');
-      return JSON.parse(data);
+      const state = JSON.parse(data);
+      
+      // Initialize orderBook with saved state if it exists
+      if (state.orderBook) {
+        orderBook.loadState(state.orderBook);
+        devLog("OrderBook state restored");
+      } else {
+        devLog("No OrderBook state found in saved state");
+      }
+      
+      return state;
     }
   } catch (error) {
     console.error("Error loading state:", error);
@@ -335,12 +372,12 @@ function emitRestartTrading() {
 
 function clearRecentTrades() {
   recentTrades.length = 0; // This clears the array
-  console.log("Recent trades cleared");
+  devLog("Recent trades cleared");
 }
 
 // Socket.io setup
 io.on('connection', (socket) => {
-  console.log('\nNew client connected');
+  devLog('\nNew client connected');
   // Send server identification
   socket.emit('serverIdentification', {
     type: 'pulse',
@@ -348,41 +385,9 @@ io.on('connection', (socket) => {
     version: getVersion()
   });
   socket.on('disconnect', () => {
-    console.log('\nClient disconnected');
+    devLog('\nClient disconnected');
   });
 });
-
-// Exchange rate functionality
-let currentExchangeRate = 0.909592; // Default value from the provided JSON
-let nextUpdateTime = Date.now(); // Initialize to current time
-
-async function fetchExchangeRate() {
-  try {
-    const response = await axios.get('https://open.er-api.com/v6/latest/USD');
-    const data = response.data;
-
-    if (data.result === "success") {
-      currentExchangeRate = data.rates.EUR;
-      console.log('\nUSD/EUR exchange rate:', currentExchangeRate);
-
-      // Set the next update time
-      nextUpdateTime = data.time_next_update_unix * 1000; // Convert to milliseconds
-      console.log('Next USD/EUR update:', new Date(nextUpdateTime).toUTCString());
-
-      // Schedule the next update
-      const timeUntilNextUpdate = nextUpdateTime - Date.now();
-      setTimeout(fetchExchangeRate, timeUntilNextUpdate);
-    } else {
-      console.error('Failed to fetch exchange rate:', data);
-      // Retry after 1 hour if there's an error
-      setTimeout(fetchExchangeRate, 60 * 60 * 1000);
-    }
-  } catch (error) {
-    console.error('Error fetching exchange rate:', error);
-    // Retry after 1 hour if there's an error
-    setTimeout(fetchExchangeRate, 60 * 60 * 1000);
-  }
-}
 
 function calculateAPY(initialValue, currentValue, runTimeInDays) {
   // Check if less than 48 hours have passed
@@ -437,9 +442,6 @@ function getRunTimeInDays(startTime) {
   return runTimeInDays;
 }
 
-// Call this function when your server starts
-fetchExchangeRate();
-
 function getLatestTradingData() {
   if (!initialData) {
     return null;
@@ -447,7 +449,7 @@ function getLatestTradingData() {
   const days = getRunTimeInDays(initialData.startTime);
   const estimatedAPY = calculateAPY(initialData.initialPortfolioValue, initialData.portfolioValue, days);
 
-  console.log(`Server Version: ${getVersion()}`);
+  devLog(`Server Version: ${getVersion()}`);
   return {
     version: getVersion(),
     fearGreedIndex: initialData.fearGreedIndex,
@@ -456,11 +458,9 @@ function getLatestTradingData() {
     netChange: parseFloat(initialData.netChange.toFixed(3)),
     price: {
       usd: parseFloat(initialData.price.toFixed(2)),
-      eur: parseFloat((initialData.price * currentExchangeRate).toFixed(2))
     },
     portfolioValue: {
       usd: parseFloat(initialData.portfolioValue.toFixed(2)),
-      eur: parseFloat((initialData.portfolioValue * currentExchangeRate).toFixed(2))
     },
     solBalance: parseFloat(initialData.solBalance.toFixed(6)),
     usdcBalance: parseFloat(initialData.usdcBalance.toFixed(2)),
@@ -469,24 +469,58 @@ function getLatestTradingData() {
       sol: parseFloat(((initialData.solBalance * initialData.price / initialData.portfolioValue) * 100).toFixed(2))
     },
     averageEntryPrice: {
-      usd: initialData.averageEntryPrice > 0 ? parseFloat(initialData.averageEntryPrice.toFixed(2)) : 'N/A',
-      eur: initialData.averageEntryPrice > 0 ? parseFloat((initialData.averageEntryPrice * currentExchangeRate).toFixed(2)) : 'N/A'
+      usd: initialData.averageEntryPrice > 0 ? parseFloat(initialData.averageEntryPrice.toFixed(2)) : 'N/A'
     },
     averageSellPrice: {
-      usd: initialData.averageSellPrice > 0 ? parseFloat(initialData.averageSellPrice.toFixed(2)) : 'N/A',
-      eur: initialData.averageSellPrice > 0 ? parseFloat((initialData.averageSellPrice * currentExchangeRate).toFixed(2)) : 'N/A'
+      usd: initialData.averageSellPrice > 0 ? parseFloat(initialData.averageSellPrice.toFixed(2)) : 'N/A'
     },
     programRunTime: formatTime(Date.now() - initialData.startTime),
     portfolioTotalChange: parseFloat(((initialData.portfolioValue - initialData.initialPortfolioValue) / initialData.initialPortfolioValue * 100).toFixed(2)),
     solanaMarketChange: parseFloat(((initialData.price - initialData.initialSolPrice) / initialData.initialSolPrice * 100).toFixed(2)),
     estimatedAPY: estimatedAPY,
     recentTrades: recentTrades,
-    monitorMode: getMonitorMode()
+    monitorMode: getMonitorMode(),
+    orderbook: {
+      trades: orderBook.trades,
+      stats: orderBook.getTradeStatistics(),
+      winRate: orderBook.getTradeStatistics().winRate,
+      totalTrades: orderBook.getTradeStatistics().totalTrades,
+      openTrades: orderBook.getTradeStatistics().openTrades,
+      closedTrades: orderBook.getTradeStatistics().closedTrades,
+      totalRealizedPnl: orderBook.getTradeStatistics().totalRealizedPnl,
+      totalUnrealizedPnl: orderBook.getTradeStatistics().totalUnrealizedPnl,
+      totalVolume: orderBook.getTradeStatistics().totalVolume
+    }
   };
 }
 
+function getOrderBookStats() {
+  if (!orderBook) {
+    return {
+      winRate: 0,
+      totalTrades: 0,
+      openTrades: 0,
+      closedTrades: 0,
+      totalRealizedPnl: 0,
+      totalUnrealizedPnl: 0,
+      totalVolume: 0
+    };
+  }
+  return orderBook.getTradeStatistics();
+}
+
 function emitTradingData(data) {
-  console.log('Server emitting trading data with version:', data.version);
+  devLog('Server emitting trading data with version:', data.version);
+  
+  if (!orderBook) {
+    console.error('OrderBook not initialized');
+    return;
+  }
+
+  // Get fresh orderbook data and stats
+  const orderBookStats = orderBook.getTradeStatistics();
+  const orderBookTrades = orderBook.trades;
+
   const runTimeMs = Date.now() - data.startTime;
   const programRunTime = formatTime(runTimeMs);
 
@@ -497,28 +531,23 @@ function emitTradingData(data) {
     version: data.version,
     timestamp: data.timestamp,
     price: {
-      usd: parseFloat(data.price.toFixed(2)),
-      eur: parseFloat((data.price * currentExchangeRate).toFixed(2))
+      usd: parseFloat(data.price.toFixed(2))
     },
     netChange: {
-      usd: parseFloat(data.netChange.toFixed(3)),
-      eur: parseFloat((data.netChange * currentExchangeRate).toFixed(3))
+      usd: parseFloat(data.netChange.toFixed(3))
     },
     portfolioValue: {
-      usd: parseFloat(data.portfolioValue.toFixed(2)),
-      eur: parseFloat((data.portfolioValue * currentExchangeRate).toFixed(2))
+      usd: parseFloat(data.portfolioValue.toFixed(2))
     },
     fearGreedIndex: data.fearGreedIndex,
     sentiment: data.sentiment,
     usdcBalance: parseFloat(data.usdcBalance.toFixed(2)),
     solBalance: parseFloat(data.solBalance.toFixed(6)),
     averageEntryPrice: {
-      usd: data.averageEntryPrice > 0 ? parseFloat(data.averageEntryPrice.toFixed(2)) : 'N/A',
-      eur: data.averageEntryPrice > 0 ? parseFloat((data.averageEntryPrice * currentExchangeRate).toFixed(2)) : 'N/A'
+      usd: data.averageEntryPrice > 0 ? parseFloat(data.averageEntryPrice.toFixed(2)) : 'N/A'
     },
     averageSellPrice: {
-      usd: data.averageSellPrice > 0 ? parseFloat(data.averageSellPrice.toFixed(2)) : 'N/A',
-      eur: data.averageSellPrice > 0 ? parseFloat((data.averageSellPrice * currentExchangeRate).toFixed(2)) : 'N/A'
+      usd: data.averageSellPrice > 0 ? parseFloat(data.averageSellPrice.toFixed(2)) : 'N/A'
     },
     recentTrades: recentTrades,
     txId: data.txId || null,
@@ -531,23 +560,30 @@ function emitTradingData(data) {
     portfolioTotalChange: parseFloat(((data.portfolioValue - data.initialPortfolioValue) / data.initialPortfolioValue * 100).toFixed(2)),
     solanaMarketChange: parseFloat(((data.price - data.initialSolPrice) / data.initialSolPrice * 100).toFixed(2)),
     estimatedAPY: estimatedAPY,
-    nextExchangeRateUpdate: new Date(nextUpdateTime).toUTCString(),
     monitorMode: getMonitorMode(),
+    orderbook: {
+      trades: orderBookTrades,
+      winRate: orderBookStats.winRate,
+      totalTrades: orderBookStats.totalTrades,
+      openTrades: orderBookStats.openTrades,
+      closedTrades: orderBookStats.closedTrades,
+      totalRealizedPnl: orderBookStats.totalRealizedPnl,
+      totalUnrealizedPnl: orderBookStats.totalUnrealizedPnl,
+      totalVolume: orderBookStats.totalVolume
+    },
     initialData: {
       solPrice: {
-        usd: parseFloat(data.initialSolPrice.toFixed(2)),
-        eur: parseFloat((data.initialSolPrice * currentExchangeRate).toFixed(2))
+        usd: parseFloat(data.initialSolPrice.toFixed(2))
       },
       portfolioValue: {
-        usd: parseFloat(data.initialPortfolioValue.toFixed(2)),
-        eur: parseFloat((data.initialPortfolioValue * currentExchangeRate).toFixed(2))
+        usd: parseFloat(data.initialPortfolioValue.toFixed(2))
       },
       solBalance: parseFloat(data.initialSolBalance.toFixed(6)),
       usdcBalance: parseFloat(data.initialUsdcBalance.toFixed(2))
     }
   };
 
-  console.log('Emitting trading data:', emitData);
+  devLog('Emitting trading data:', emitData);
   io.emit('tradingUpdate', emitData);
 
   // Update initialData with the latest data
@@ -573,6 +609,7 @@ module.exports = {
   server,
   io,
   paramUpdateEmitter,
+  orderBook,
   setInitialData: (data) => {
     initialData = data;
   },

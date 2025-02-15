@@ -1,10 +1,10 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SolSurfer Trading System</title>
+    <title>SolSurfer Trading Bot</title>
     <link rel="icon" href="/surfsolana_icon.svg" type="image/svg+xml">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
@@ -22,6 +22,8 @@
         <div class="container">
             <h1>> Solsurfer Fear and Greed Trader</h1>
             <p>> By SurfSolana Team</p>
+
+            <!-- Chart & F&G Section -->
             <div class="chart-section">
                 <div class="chart-container">
                     <iframe
@@ -44,46 +46,181 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Performance Metrics Section -->
+            <div class="card full-width">
+                <h2>> Performance & Financial Overview</h2>
+                <div class="metrics-grid">
+                    <!-- Row 1 -->
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-chart-line"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Win Rate</div>
+                            <div id="winRate" class="data-value">Calculating...</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Percentage of closed trades that resulted in profit</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-list-ol"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Total Trades</div>
+                            <div id="totalTrades" class="data-value">0</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Total number of trades executed since trading began</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-clock"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Open Positions</div>
+                            <div id="openTrades" class="data-value">0</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Number of currently active trades that haven't been closed</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-check-square"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Closed Trades</div>
+                            <div id="closedTrades" class="data-value">0</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Number of completed trades that have been fully settled</div>
+                        </div>
+                    </div>
+                
+                    <!-- Row 2 -->
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-dollar-sign"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Total PnL</div>
+                            <div id="totalPnl" class="data-value">$0.00</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Total realized profit or loss from all closed trades</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Unrealized PnL</div>
+                            <div id="unrealizedPnl" class="data-value">$0.00</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Current estimated profit or loss of open positions based on current market price</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-chart-simple"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Total Volume</div>
+                            <div id="totalVolume" class="data-value">$0.00</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Total value of all trades executed in USD</div>
+                        </div>
+                    </div>
+                
+                    <div class="data-item">
+                        <div class="data-icon"><i class="fa-solid fa-calculator"></i></div>
+                        <div class="data-content">
+                            <div class="data-label">Avg Trade Size</div>
+                            <div id="avgTradeSize" class="data-value">$0.00</div>
+                        </div>
+                        <div class="tooltip-trigger">
+                            <i class="fa-regular fa-circle-question"></i>
+                            <div class="tooltip">Average dollar value of individual trades</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orderbook -->
+            <div class="card full-width">
+                <div class="header-flex">
+                    <h2>> Orderbook</h2>
+                </div>
+                <div class="table-container">
+                    <table id="orderbookTable" class="styled-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Price</th>
+                                <th>Amount</th>
+                                <th>Value</th>
+                                <th>PNL</th>
+                                <th>Close Price</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orderbookBody">
+                            <tr>
+                                <td colspan="8" class="empty-state">Loading trade history...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trading Parameters & Current Data Section -->
             <div class="grid">
-				<div class="card">
-					<div class="header-flex">
-						<h2>> Trading Parameters</h2>
-						<div class="spacer"></div>
-						<button id="lockToggleButton" class="lock-toggle-button">
-							<i id="lockIcon" class="fa fa-lock-open"></i> <!-- Use Font Awesome or any other icon library -->
-						</button>
-						<button id="settingsButton" class="gear-button">
-							<i class="fa fa-cog"></i>
-						</button>
-					</div>
-					<div id="chartContainer" style="width: 100%; max-width: 600px; height: auto;">
-						<canvas id="fearGreedChart"></canvas>
-					</div>
+                <div class="card">
+                    <div class="header-flex">
+                        <h2>> Trading Parameters</h2>
+                        <div class="spacer"></div>
+                        <button id="lockToggleButton" class="lock-toggle-button">
+                            <i id="lockIcon" class="fa fa-lock-open"></i>
+                        </button>
+                        <button id="settingsButton" class="gear-button">
+                            <i class="fa fa-cog"></i>
+                        </button>
+                    </div>
+                    <div id="chartContainer" style="width: 100%; max-width: 600px; height: auto;">
+                        <canvas id="fearGreedChart"></canvas>
+                    </div>
                     <form id="paramForm">
-						<div id="slider" class="slider"></div>
-                        <!-- PulseSurfer specific parameters -->
+                        <div id="slider" class="slider"></div>
+                        <!-- PulseSurfer Parameters -->
                         <div class="pulse-only">
-                            <h3></h3>
                             <div class="sentiment-row">
                                 <div class="sentiment-input">
                                     <label for="extremeGreedMultiplier">Extreme Greed Multiplier:</label>
-                                    <input type="number" id="extremeGreedMultiplier" name="extremeGreedMultiplier" min="0.01" max="0.25"
-                                        step="0.01">
+                                    <input type="number" id="extremeGreedMultiplier" name="extremeGreedMultiplier" min="0.01"
+                                        max="0.25" step="0.01">
                                 </div>
                                 <div class="sentiment-input">
                                     <label for="greedMultiplier">Greed Multiplier:</label>
-                                    <input type="number" id="greedMultiplier" name="greedMultiplier" min="0.01" max="0.25" step="0.01">
+                                    <input type="number" id="greedMultiplier" name="greedMultiplier" min="0.01" max="0.25"
+                                        step="0.01">
                                 </div>
                             </div>
                             <div class="sentiment-row">
                                 <div class="sentiment-input">
                                     <label for="extremeFearMultiplier">Extreme Fear Multiplier:</label>
-                                    <input type="number" id="extremeFearMultiplier" name="extremeFearMultiplier" min="0.01" max="0.25"
-                                        step="0.01">
+                                    <input type="number" id="extremeFearMultiplier" name="extremeFearMultiplier" min="0.01"
+                                        max="0.25" step="0.01">
                                 </div>
                                 <div class="sentiment-input">
                                     <label for="fearMultiplier">Fear Multiplier:</label>
-                                    <input type="number" id="fearMultiplier" name="fearMultiplier" min="0.01" max="0.25" step="0.01">
+                                    <input type="number" id="fearMultiplier" name="fearMultiplier" min="0.01" max="0.25"
+                                        step="0.01">
                                 </div>
                             </div>
                         </div>
@@ -91,51 +228,50 @@
                             <div id="updateFeedback"></div>
                         </div>
                     </form>
-				</div>
+                </div>
                 <div class="card">
                     <h2>> Current Trading Data</h2>
                     <div id="timestamp" class="timestamp"></div>
                     <div id="versionNumber" class="version-number"></div>
-                    <div id="tradingData" class="trading-data-grid">
-                    </div>
+                    <div id="tradingData" class="trading-data-grid"></div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Settings Popup -->
     <div id="settingsPopup" class="popup-menu">
         <div class="popup-content">
             <button id="closePopupButton" class="close-popup-button">×</button>
             <h1>Settings</h1>
             <div class="button-column">
-				<div class="user-input">
-					<label for="monthlyCost">Montly Cost (USD):</label>
-					<div class="input-container">
-						<input type="number" id="monthlyCost" name="monthlyCost" min="0"
-							max="999" step="0.01">
-						<button type="button" id="monthlyCostButton" class="monthlyCostButton">Submit</button>
-					</div>
+                <div class="user-input">
+                    <label for="monthlyCost">Monthly Cost (USD):</label>
+                    <div class="input-container">
+                        <input type="number" id="monthlyCost" name="monthlyCost" min="0" max="999" step="0.01">
+                        <button type="button" id="monthlyCostButton" class="monthlyCostButton">Submit</button>
+                    </div>
                 </div>
-				<div class="user-input">
-					<label for="devTip">Developer Tip (%):</label>
-					<div class="input-container">
-						<input type="number" id="devTip" name="devTip" min="0"
-							max="2" step="0.01">
-						<button type="button" id="devTipButton" class="devTipButton">Submit</button>
-					</div>
+                <div class="user-input">
+                    <label for="devTip">Developer Tip (%):</label>
+                    <div class="input-container">
+                        <input type="number" id="devTip" name="devTip" min="0" max="2" step="0.01">
+                        <button type="button" id="devTipButton" class="devTipButton">Submit</button>
+                    </div>
                 </div>
                 <button type="button" id="restartButton">Restart Trading</button>
             </div>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="/socket.io/socket.io.js"></script>
     <script type="module" src="script.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-	<script type="module" src="./chart.js"></script>
-	<script type="module" src="./slider.js"></script>
-	<link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.css" rel="stylesheet">
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="./chart.js"></script>
+    <script type="module" src="./slider.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.6.0/nouislider.min.js"></script>
 </body>
 
 </html>

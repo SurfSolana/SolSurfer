@@ -9,7 +9,9 @@ export function initializeSlider(params, serverType, isLocked) {
     }
 
      let startValues, buttonLabels;
-    
+     serverType = 'pulse';
+     
+    if (serverType === 'pulse') {
         startValues = [
             params.SENTIMENT_BOUNDARIES?.EXTREME_FEAR ?? 20,
             params.SENTIMENT_BOUNDARIES?.FEAR ?? 40,
@@ -23,6 +25,7 @@ export function initializeSlider(params, serverType, isLocked) {
             'Greed',        // For 2
             'Extreme Greed' // For 3
         ];
+    }
 
     noUiSlider.create(slider, {
         start: startValues,

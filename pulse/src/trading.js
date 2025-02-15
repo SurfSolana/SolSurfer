@@ -1,17 +1,17 @@
-const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL } = require('./api');
+const { getQuote, getFeeAccountAndSwapTransaction, BASE_SWAP_URL, fetchFearGreedIndex, isFGIChangeSignificant } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
 const { readSettings } = require('./pulseServer');
-const { attemptRPCFailover } = require('./utils');
+const { attemptRPCFailover, devLog, formatTime, checkTradingPeriod, setNewTradingPeriod, getCurrentPeriodInfo, resetTradingPeriod } = require('./utils');
 const { PublicKey, VersionedTransaction, TransactionMessage, SystemProgram, TransactionInstruction } = require('@solana/web3.js');
 const { getAssociatedTokenAddress } = require("@solana/spl-token");
 const bs58 = require('bs58');
-const WebSocket = require('ws');
 const fetch = require('cross-fetch');
 const fs = require('fs');
 const path = require('path');
 const BN = require('bn.js');
 const borsh = require('@coral-xyz/borsh');
 
+const lastTradeTime = new Map();
 let isBundleCancelled = false;
 
 const USDC = {
@@ -54,7 +54,7 @@ function logTradeToFile(tradeData) {
 
         // Create timestamp
         const now = new Date();
-        const timestamp = now.toISOString().replace('T', ' ').slice(0, 19); // Format: YYYY-MM-DD HH:MM:SS
+        const timestamp = now.toISOString().replace('T', ' ').slice(0, 19);
 
         // Create CSV line with timestamp
         const csvLine = `${timestamp},${inputToken},${outputToken},${inputAmount},${outputAmount},${jitoStatus}\n`;
@@ -79,7 +79,7 @@ function logTradeToFile(tradeData) {
 
         // Append the trade data
         fs.appendFileSync(filePath, csvLine);
-        console.log('Successfully logged trade data');
+        devLog('Successfully logged trade data');
 
     } catch (error) {
         console.error('Error logging trade:', error);
@@ -95,14 +95,176 @@ function cancelPendingBundle() {
     isBundleCancelled = true;
 }
 
+function isTradeOnCooldown(wallet, settings) {
+    const now = Date.now();
+    const lastTrade = lastTradeTime.get(wallet.publicKey.toString());
+
+    if (!lastTrade) return false;
+
+    const cooldownMs = settings.TRADE_COOLDOWN_MINUTES * 60 * 1000;
+    const timeSinceLastTrade = now - lastTrade;
+
+    if (timeSinceLastTrade < cooldownMs) {
+        const remaining = cooldownMs - timeSinceLastTrade;
+        console.log(`Trade cooldown active. ${formatTime(remaining)} remaining`);
+        return true;
+    }
+
+    return false;
+}
+
+function calculateTradeAmount(balance, sentiment, tokenInfo) {
+    try {
+        const {
+            SENTIMENT_MULTIPLIERS,
+            TRADE_SIZE_METHOD = 'STRATEGIC',
+            STRATEGIC_PERCENTAGE = 2.5
+        } = readSettings();
+
+        if (!SENTIMENT_MULTIPLIERS || !SENTIMENT_MULTIPLIERS[sentiment]) {
+            console.error(`Invalid sentiment multiplier for sentiment: ${sentiment}`);
+            return 0;
+        }
+
+        const sentimentMultiplier = SENTIMENT_MULTIPLIERS[sentiment];
+        if (!balance || balance <= 0) {
+            console.error(`Invalid balance: ${balance}`);
+            return 0;
+        }
+
+        if (TRADE_SIZE_METHOD === 'VARIABLE') {
+            // Original trading size calculation logic
+            const rawAmount = balance * sentimentMultiplier;
+            return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
+        } else if (TRADE_SIZE_METHOD === 'STRATEGIC') {
+            // Get both current balances
+            const wallet = getWallet();
+            const { needsNewPeriod, currentBaseSizes } = checkTradingPeriod();
+
+            if (needsNewPeriod) {
+                // Calculate new base trade sizes for both tokens
+                const baseSizes = setNewTradingPeriod(
+                    wallet.solBalance,
+                    wallet.usdcBalance,
+                    STRATEGIC_PERCENTAGE
+                );
+
+                // Use the appropriate base size for the current token
+                const baseAmount = baseSizes[tokenInfo.NAME];
+                return Math.floor(baseAmount * (10 ** tokenInfo.DECIMALS));
+            }
+
+            // Use existing base trade size for the current token
+            const baseAmount = currentBaseSizes[tokenInfo.NAME];
+            return Math.floor(baseAmount * (10 ** tokenInfo.DECIMALS));
+        }
+
+        // Default to STRATEGIC if invalid method specified
+        return calculateTradeAmount(balance, sentiment, tokenInfo);
+    } catch (error) {
+        console.error('Error calculating trade amount:', error);
+        return 0;
+    }
+}
+
+async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint) {
+    try {
+        devLog("Initiating exact out swap");
+
+        const decimals = outputMint === SOL.ADDRESS ? SOL.DECIMALS : USDC.DECIMALS;
+        const exactOutAmountFloor = Math.floor(exactOutAmount);
+
+        devLog(`Exact Out Swap Details:`, {
+            outputMint: outputMint === SOL.ADDRESS ? 'SOL' : 'USDC',
+            inputMint: inputMint === SOL.ADDRESS ? 'SOL' : 'USDC',
+            rawAmount: exactOutAmount,
+            adjustedAmount: exactOutAmountFloor,
+            decimals: decimals
+        });
+
+        const params = new URLSearchParams({
+            inputMint: inputMint,
+            outputMint: outputMint,
+            amount: exactOutAmountFloor,
+            slippageBps: '50',
+            platformFeeBps: '0',
+            onlyDirectRoutes: 'false',
+            asLegacyTransaction: 'false',
+            swapMode: 'ExactOut'
+        });
+
+        const quoteUrl = `${BASE_SWAP_URL}/quote?${params.toString()}`;
+        devLog(quoteUrl);
+        const response = await fetch(quoteUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const quoteResponse = await response.json();
+
+        let swapTransaction = await getFeeAccountAndSwapTransaction(
+            new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
+            new PublicKey(inputMint),
+            quoteResponse,
+            wallet
+        );
+
+        if (!swapTransaction) {
+            devLog('Failed to create swap transaction');
+            return null;
+        }
+
+        console.log("Awaiting Confirmation...");
+        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, quoteResponse.inAmount, quoteResponse, inputMint === SOL.ADDRESS);
+
+        if (!jitoBundleResult) return null;
+
+        console.log("Updating Trade Information...");
+        const inputAmount = quoteResponse.inAmount / (10 ** (inputMint === SOL.ADDRESS ? SOL.DECIMALS : USDC.DECIMALS));
+        const outputAmount = exactOutAmount / (10 ** (outputMint === SOL.ADDRESS ? SOL.DECIMALS : USDC.DECIMALS));
+
+        // Log the trade
+        logTradeToFile({
+            inputToken: inputMint === SOL.ADDRESS ? 'SOL' : 'USDC',
+            outputToken: outputMint === SOL.ADDRESS ? 'SOL' : 'USDC',
+            inputAmount: inputAmount.toFixed(6),
+            outputAmount: outputAmount.toFixed(6),
+            jitoStatus: 'Success'
+        });
+
+        const solChange = outputMint === SOL.ADDRESS ? outputAmount : -inputAmount;
+        const usdcChange = outputMint === USDC.ADDRESS ? outputAmount : -inputAmount;
+        const price = Math.abs(usdcChange / solChange);
+
+        console.log("Trade Successful!")
+        return {
+            txId: jitoBundleResult.swapTxSignature,
+            price,
+            solChange,
+            usdcChange,
+            ...jitoBundleResult
+        };
+
+    } catch (error) {
+        console.error('Error executing exact out swap:', error);
+        return null;
+    }
+}
+
 async function executeSwap(wallet, sentiment, USDC, SOL) {
+    const settings = readSettings();
+
+    // Check cooldown
+    if (isTradeOnCooldown(wallet, settings)) {
+        return 'cooldownfail';
+    }
+
     let tradeAmount;
     let isBuying;
     let inputMint;
     let outputMint;
 
     try {
-        console.log("Initiating swap with sentiment:", sentiment);
+        devLog("Initiating swap with sentiment:", sentiment);
 
         isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
         inputMint = isBuying ? USDC.ADDRESS : SOL.ADDRESS;
@@ -112,16 +274,16 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
 
         if (!tradeAmount || tradeAmount <= 0) {
-            console.log('Invalid trade amount calculated');
+            devLog('Invalid trade amount calculated');
             return null;
         }
 
-        console.log(`Calculated trade amount: ${tradeAmount}`);
+        devLog(`Calculated trade amount: ${tradeAmount}`);
 
         // Get initial quote
         let quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
         if (!quoteResponse) {
-            console.log('Failed to get quote');
+            devLog('Failed to get quote');
             return null;
         }
 
@@ -133,14 +295,16 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         );
 
         if (!swapTransaction) {
-            console.log('Failed to create swap transaction');
+            devLog('Failed to create swap transaction');
             return null;
         }
 
+        console.log("Awaiting Confirmation...");
         const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse, isBuying);
 
         if (!jitoBundleResult) return null;
 
+        console.log("Updating Trade Information...");
         // Calculate final amounts for successful trade
         const inputAmount = tradeAmount / (10 ** (isBuying ? USDC.DECIMALS : SOL.DECIMALS));
         const outputAmount = jitoBundleResult.finalQuote.outAmount / (10 ** (isBuying ? SOL.DECIMALS : USDC.DECIMALS));
@@ -157,6 +321,8 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         const usdcChange = isBuying ? -tradeAmount / (10 ** USDC.DECIMALS) : jitoBundleResult.finalQuote.outAmount / (10 ** USDC.DECIMALS);
         const price = Math.abs(usdcChange / solChange);
 
+        console.log("Trade Successful!")
+        lastTradeTime.set(wallet.publicKey.toString(), Date.now());
         return {
             txId: jitoBundleResult.swapTxSignature,
             price,
@@ -166,7 +332,6 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
         };
 
     } catch (error) {
-        // Only log the essential information on failure
         logTradeToFile({
             inputToken: isBuying ? 'USDC' : 'SOL',
             outputToken: isBuying ? 'SOL' : 'USDC',
@@ -179,50 +344,28 @@ async function executeSwap(wallet, sentiment, USDC, SOL) {
     }
 }
 
-function calculateTradeAmount(balance, sentiment, tokenInfo) {
-    try {
-        const { SENTIMENT_MULTIPLIERS } = readSettings();
-        if (!SENTIMENT_MULTIPLIERS || !SENTIMENT_MULTIPLIERS[sentiment]) {
-            console.error(`Invalid sentiment multiplier for sentiment: ${sentiment}`);
-            return 0;
-        }
-
-        const sentimentMultiplier = SENTIMENT_MULTIPLIERS[sentiment];
-        if (!balance || balance <= 0) {
-            console.error(`Invalid balance: ${balance}`);
-            return 0;
-        }
-
-        const rawAmount = balance * sentimentMultiplier;
-        return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
-    } catch (error) {
-        console.error('Error calculating trade amount:', error);
-        return 0;
-    }
-}
-
 async function updatePortfolioBalances(wallet, connection) {
     if (!wallet || !connection) {
         throw new Error("Wallet or connection is not initialized");
     }
-    
+
     try {
         const solBalance = await getTokenBalance(connection, wallet.publicKey.toString(), SOL.ADDRESS);
         const usdcBalance = await getTokenBalance(connection, wallet.publicKey.toString(), USDC.ADDRESS);
 
         // Check if balances are suspiciously zero - might indicate RPC issue
         if (solBalance === 0 && usdcBalance === 0) {
-            console.log("Warning: Both balances returned as 0, attempting RPC failover...");
+            devLog("Warning: Both balances returned as 0, attempting RPC failover...");
             const failoverSuccess = await attemptRPCFailover(wallet);
-            
+
             if (failoverSuccess) {
                 // Retry with new connection
                 const newSolBalance = await getTokenBalance(wallet.connection, wallet.publicKey.toString(), SOL.ADDRESS);
                 const newUsdcBalance = await getTokenBalance(wallet.connection, wallet.publicKey.toString(), USDC.ADDRESS);
-                
+
                 wallet.solBalance = newSolBalance;
                 wallet.usdcBalance = newUsdcBalance;
-                
+
                 return { solBalance: newSolBalance, usdcBalance: newUsdcBalance };
             }
         }
@@ -233,25 +376,25 @@ async function updatePortfolioBalances(wallet, connection) {
         return { solBalance, usdcBalance };
     } catch (error) {
         console.error("Error updating portfolio balances:", error);
-        
+
         // Attempt failover on error
         const failoverSuccess = await attemptRPCFailover(wallet);
         if (failoverSuccess) {
             // Retry the balance update with new connection
             return updatePortfolioBalances(wallet, wallet.connection);
         }
-        
+
         throw error;
     }
 }
 
 function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
     if (!swapResult) {
-        console.log("No swap executed or swap failed. Position remains unchanged.");
+        devLog("No swap executed or swap failed. Position remains unchanged.");
         return null;
     }
 
-    console.log('Swap result:', swapResult);
+    devLog('Swap result:', swapResult);
 
     const { price, solChange, usdcChange, txId } = swapResult;
 
@@ -260,7 +403,7 @@ function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
         return null;
     }
 
-    console.log('Updating position with:', { price, solChange, usdcChange, txId });
+    devLog('Updating position with:', { price, solChange, usdcChange, txId });
 
     position.logTrade(sentiment, price, solChange, usdcChange);
     logPositionUpdate(position, currentPrice);
@@ -280,18 +423,18 @@ function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
 function logPositionUpdate(position, currentPrice) {
     const enhancedStats = position.getEnhancedStatistics(currentPrice);
 
-    console.log("\n--- Current Position ---");
-    console.log(`SOL Balance: ${position.solBalance.toFixed(SOL.DECIMALS)} SOL`);
-    console.log(`USDC Balance: ${position.usdcBalance.toFixed(USDC.DECIMALS)} USDC`);
-    console.log(`Average Entry Price: $${enhancedStats.averagePrices.entry}`);
-    console.log(`Average Sell Price: $${enhancedStats.averagePrices.sell}`);
-    console.log(`Current SOL Price: $${currentPrice.toFixed(2)}`);
-    console.log(`Initial Portfolio Value: $${enhancedStats.portfolioValue.initial}`);
-    console.log(`Current Portfolio Value: $${enhancedStats.portfolioValue.current}`);
-    console.log(`Net Change: $${enhancedStats.netChange}`);
-    console.log(`Portfolio Change: ${enhancedStats.portfolioValue.percentageChange}%`);
-    console.log(`Total Volume: ${enhancedStats.totalVolume.sol} SOL / ${enhancedStats.totalVolume.usdc} USDC`);
-    console.log("------------------------\n");
+    devLog("\n--- Current Position ---");
+    devLog(`SOL Balance: ${position.solBalance.toFixed(SOL.DECIMALS)} SOL`);
+    devLog(`USDC Balance: ${position.usdcBalance.toFixed(USDC.DECIMALS)} USDC`);
+    devLog(`Average Entry Price: $${enhancedStats.averagePrices.entry}`);
+    devLog(`Average Sell Price: $${enhancedStats.averagePrices.sell}`);
+    devLog(`Current SOL Price: $${currentPrice.toFixed(2)}`);
+    devLog(`Initial Portfolio Value: $${enhancedStats.portfolioValue.initial}`);
+    devLog(`Current Portfolio Value: $${enhancedStats.portfolioValue.current}`);
+    devLog(`Net Change: $${enhancedStats.netChange}`);
+    devLog(`Portfolio Change: ${enhancedStats.portfolioValue.percentageChange}%`);
+    devLog(`Total Volume: ${enhancedStats.totalVolume.sol} SOL / ${enhancedStats.totalVolume.usdc} USDC`);
+    devLog("------------------------\n");
 }
 
 async function getTokenBalance(connection, walletAddress, mintAddress) {
@@ -320,19 +463,19 @@ async function getTokenBalance(connection, walletAddress, mintAddress) {
 }
 
 async function resetPosition() {
-    console.log("Entering resetPosition function");
+    devLog("Entering resetPosition function");
     const wallet = getWallet();
     const connection = getConnection();
-    console.log("Wallet:", wallet);
-    console.log("Connection:", connection);
+    devLog("Wallet:", wallet);
+    devLog("Connection:", connection);
     const { solBalance, usdcBalance } = await updatePortfolioBalances(wallet, connection);
     const currentPrice = await fetchPrice(BASE_PRICE_URL, SOL);
     position = new Position(solBalance, usdcBalance, currentPrice);
-    console.log("Position reset. New position:");
-    console.log(`SOL Balance: ${solBalance.toFixed(SOL.DECIMALS)} SOL`);
-    console.log(`USDC Balance: ${usdcBalance.toFixed(USDC.DECIMALS)} USDC`);
-    console.log(`Current SOL Price: $${currentPrice.toFixed(2)}`);
-    console.log(`Portfolio Value: $${position.getCurrentValue(currentPrice).toFixed(2)}`);
+    devLog("Position reset. New position:");
+    devLog(`SOL Balance: ${solBalance.toFixed(SOL.DECIMALS)} SOL`);
+    devLog(`USDC Balance: ${usdcBalance.toFixed(USDC.DECIMALS)} USDC`);
+    devLog(`Current SOL Price: $${currentPrice.toFixed(2)}`);
+    devLog(`Portfolio Value: $${position.getCurrentValue(currentPrice).toFixed(2)}`);
 
     const initialData = {
         version: getVersion(),
@@ -447,50 +590,43 @@ function create_increment_tx(
     return tx;
 }
 
-// Jito-related functions
-
 function getRandomTipAccount() {
     return TIP_ACCOUNTS[Math.floor(Math.random() * TIP_ACCOUNTS.length)];
 }
 
 async function jitoTipCheck() {
-    const JitoTipWS = 'ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream';
-    return new Promise((resolve, reject) => {
-        const tipws = new WebSocket(JitoTipWS);
-        tipws.on('open', function open() { });
-        tipws.on('message', function incoming(data) {
-            const str = data.toString();
-            try {
-                const json = JSON.parse(str);
-                const emaPercentile50th = json[0].ema_landed_tips_50th_percentile;
-                if (emaPercentile50th !== null) {
-                    tipws.close();
-                    resolve(emaPercentile50th);
-                } else {
-                    reject(new Error('50th percentile is null'));
-                }
-            } catch (err) {
-                reject(err);
-            }
+    try {
+        const response = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', {
+            timeout: 21000
         });
-        tipws.on('error', function error(err) {
-            console.error('WebSocket error:', err);
-            reject(err);
-        });
-        setTimeout(() => {
-            tipws.close();
-            reject(new Error('Timeout'));
-        }, 21000);
-    });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!Array.isArray(data) || !data[0] || data[0].ema_landed_tips_50th_percentile === null) {
+            throw new Error('Invalid tip floor data structure');
+        }
+
+        const emaPercentile50th = data[0].ema_landed_tips_50th_percentile;
+        devLog('Current Jito tip floor (50th EMA):', emaPercentile50th);
+        return emaPercentile50th;
+
+    } catch (error) {
+        console.error('Error fetching Jito tip floor:', error);
+        throw error;
+    }
 }
 
 async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, isBuying) {
     isBundleCancelled = false;
     try {
-        console.log(`\nAttempting to send Jito bundle...`);
+        devLog(`\nAttempting to send Jito bundle...`);
 
         if (isBundleCancelled) {
-            console.log('Bundle cancelled, abandoning transaction...');
+            devLog('Bundle cancelled, abandoning transaction...');
             return null;
         }
 
@@ -500,7 +636,7 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
             const swapTransactionBuf = Buffer.from(initialSwapTransaction, 'base64');
             transaction = VersionedTransaction.deserialize(swapTransactionBuf);
         } catch (error) {
-            console.log('Failed to deserialize transaction');
+            devLog('Failed to deserialize transaction');
             return null;
         }
 
@@ -516,13 +652,13 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
             Math.min(tipValueInSol, maxJitoTip) * 1_000_000_000 * 1.1
         );
 
-        console.log(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
+        devLog(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
 
         if (isBundleCancelled) return null;
 
         // Get fresh blockhash
         const { blockhash } = await wallet.connection.getLatestBlockhash("confirmed");
-        console.log(`\nNew Blockhash: ${blockhash}`);
+        devLog(`\nNew Blockhash: ${blockhash}`);
 
         // Create tip transaction with new blockhash
         const tipAccount = new PublicKey(getRandomTipAccount());
@@ -538,26 +674,26 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
             instructions: [tipIxn]
         }).compileToV0Message();
 
-        const successful_trades = 1n; // Always increment by 1 for a successful trade (Bundles will only ever be successful, the tx doesnt land otherwise so we never have to account for fails)
-        const sol_lamport_volume = BigInt(!isBuying ? tradeAmount : 0); // Only if selling SOL
-        const usd_lamport_volume = BigInt(isBuying ? tradeAmount : 0); // Only if buying SOL
+        const successful_trades = 1n;
+        const sol_lamport_volume = BigInt(!isBuying ? tradeAmount : 0);
+        const usd_lamport_volume = BigInt(isBuying ? tradeAmount : 0);
         const jup_lamport_volume = 0n;
         const wif_lamport_volume = 0n;
         const bonk_lamport_volume = 0n;
 
-        console.log(successful_trades)
-        console.log(sol_lamport_volume)
-        console.log(usd_lamport_volume)
-        console.log(jup_lamport_volume)
-        console.log(wif_lamport_volume)
-        console.log(bonk_lamport_volume)
+        devLog(successful_trades)
+        devLog(sol_lamport_volume)
+        devLog(usd_lamport_volume)
+        devLog(jup_lamport_volume)
+        devLog(wif_lamport_volume)
+        devLog(bonk_lamport_volume)
 
         const incrementTx = create_increment_tx(
             wallet,
             blockhash,
             successful_trades,
             sol_lamport_volume,
-            usd_lamport_volume, 
+            usd_lamport_volume,
             jup_lamport_volume,
             wif_lamport_volume,
             bonk_lamport_volume
@@ -572,7 +708,7 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
 
         const bundleToSend = [transaction, txSub, incrementTx];
 
-        console.log(`Sending bundle with blockhash: ${blockhash}`);
+        devLog(`Sending bundle with blockhash: ${blockhash}`);
         const jitoBundleResult = await sendJitoBundle(bundleToSend);
 
         const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
@@ -580,11 +716,11 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
 
         if (isBundleCancelled) return null;
 
-        console.log(`\nWaiting for bundle confirmation...`);
+        devLog(`\nWaiting for bundle confirmation...`);
         const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
 
         if (confirmationResult.status === "Landed") {
-            console.log(`Bundle landed successfully`);
+            devLog(`Bundle landed successfully`);
             return {
                 jitoBundleResult,
                 swapTxSignature,
@@ -593,13 +729,13 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
                 ...confirmationResult,
                 finalBlockhash: blockhash
             };
-        } 
-        
-        console.log(`\nBundle failed. Blockhash: ${blockhash}`);
+        }
+
+        devLog(`\nBundle failed. Blockhash: ${blockhash}`);
         return null;
 
     } catch (error) {
-        console.log('Bundle execution failed:', error); // Add error details
+        console.error('Bundle execution failed:', error);
         return null;
     }
 }
@@ -607,28 +743,28 @@ async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, ini
 async function waitForBundleConfirmation(bundleId) {
     const checkInterval = 2000; // Check every 2 seconds
     let retries = 0;
-    const maxRetries = 45; // Will check for about 90 seconds total
+    const maxRetries = 60; // Will check for about 120 seconds total
 
     while (retries < maxRetries && !isBundleCancelled) {
         try {
             const status = await getInFlightBundleStatus(bundleId);
 
             if (isBundleCancelled) {
-                console.log('Bundle confirmation cancelled by user');
+                devLog('Bundle confirmation cancelled by user');
                 return { status: "Failed", reason: "Bundle cancelled by user" };
             }
 
             if (status === null) {
-                console.log("Bundle not found. Continuing to wait...");
+                devLog("Bundle not found. Continuing to wait...");
             } else {
-                console.log(`Bundle status: ${status.status}`);
+                devLog(`Bundle status: ${status.status}`);
 
                 if (status.status === "Landed" || status.status === "Failed") {
                     return status;
                 }
             }
         } catch (error) {
-            console.log(`Error fetching bundle status:`, error.message);
+            console.error(`Error fetching bundle status:`, error.message);
         }
 
         await new Promise(resolve => setTimeout(resolve, checkInterval));
@@ -700,7 +836,7 @@ async function sendJitoBundle(bundletoSend) {
         params: [encodedBundle]
     };
 
-    console.log("Sending bundle to Jito Block Engine...");
+    devLog("Sending bundle to Jito Block Engine...");
 
     let response;
     const maxRetries = 5;
@@ -719,8 +855,8 @@ async function sendJitoBundle(bundletoSend) {
             }
 
             const responseText = await response.text();
-            console.log(`Response status: ${response.status}`);
-            console.log("Response body:", responseText);
+            devLog(`Response status: ${response.status}`);
+            devLog("Response body:", responseText);
 
             if (response.status === 400) {
                 console.error("Bad Request Error. Response details:", responseText);
@@ -730,7 +866,7 @@ async function sendJitoBundle(bundletoSend) {
             if (response.status === 429) {
                 const waitTime = Math.min(500 * Math.pow(2, i), 5000);
                 const jitter = Math.random() * 0.3 * waitTime;
-                console.log(`Rate limited. Retrying in ${waitTime + jitter}ms...`);
+                devLog(`Rate limited. Retrying in ${waitTime + jitter}ms...`);
                 await new Promise((resolve) => setTimeout(resolve, waitTime + jitter));
             } else {
                 throw new Error(`Unexpected response status: ${response.status}`);
@@ -770,13 +906,14 @@ async function sendJitoBundle(bundletoSend) {
     }
 
     const url = `https://explorer.jito.wtf/bundle/${result}`;
-    console.log(`\nJito Bundle Result: ${url}`);
+    devLog(`\nJito Bundle Result: ${url}`);
 
     return result;
 }
 
 module.exports = {
     executeSwap,
+    executeExactOutSwap,
     logTradeToFile,
     calculateTradeAmount,
     updatePortfolioBalances,

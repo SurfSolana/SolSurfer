@@ -9,6 +9,22 @@ const csv = require('csv-writer').createObjectCsvWriter;
 
 const LOG_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'fgi_log.csv');
 
+let DEVELOPER_MODE = false;
+
+let tradingPeriodState = {
+    startTime: null,
+    baseTradeSizes: {
+        SOL: null,
+        USDC: null
+    }
+};
+
+function devLog(...args) {
+    if (DEVELOPER_MODE) {
+        console.log(...args);
+    }
+}
+
 function getTimestamp() {
     const now = new Date();
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -106,6 +122,70 @@ function writeSettings(settings) {
     } catch (error) {
         console.error('Error writing settings.json:', error);
     }
+}
+
+function checkTradingPeriod() {
+    const now = Date.now();
+    
+    // Check if we need to start a new period
+    if (!tradingPeriodState.startTime || 
+        now - tradingPeriodState.startTime >= 24 * 60 * 60 * 1000) {
+        return {
+            needsNewPeriod: true,
+            currentBaseSizes: null
+        };
+    }
+
+    return {
+        needsNewPeriod: false,
+        currentBaseSizes: tradingPeriodState.baseTradeSizes
+    };
+}
+
+function setNewTradingPeriod(solBalance, usdcBalance, strategicPercentage) {
+    const baseSOL = solBalance * (strategicPercentage / 100);
+    const baseUSDC = usdcBalance * (strategicPercentage / 100);
+
+    tradingPeriodState = {
+        startTime: Date.now(),
+        baseTradeSizes: {
+            SOL: baseSOL,
+            USDC: baseUSDC
+        }
+    };
+    
+    console.log(`New trading period started at ${new Date(tradingPeriodState.startTime).toISOString()}`);
+    console.log(`Base trade sizes set to: ${baseSOL} SOL / ${baseUSDC} USDC`);
+    return tradingPeriodState.baseTradeSizes;
+}
+
+function getCurrentPeriodInfo() {
+    if (!tradingPeriodState.startTime) {
+        return {
+            active: false,
+            message: 'No active trading period'
+        };
+    }
+
+    const now = Date.now();
+    const elapsedHours = (now - tradingPeriodState.startTime) / (1000 * 60 * 60);
+    const remainingHours = 24 - elapsedHours;
+
+    return {
+        active: true,
+        startTime: new Date(tradingPeriodState.startTime).toISOString(),
+        baseTradeSizes: tradingPeriodState.baseTradeSizes,
+        elapsedHours: elapsedHours.toFixed(2),
+        remainingHours: Math.max(0, remainingHours).toFixed(2)
+    };
+}
+
+function resetTradingPeriod() {
+    tradingPeriodState = {
+        startTime: null,
+        baseTradeSize: null
+    };
+    console.log('Trading period has been reset');
 }
 
 // Logging functions
@@ -268,9 +348,14 @@ module.exports = {
     updateSettings,
     readSettings,
     writeSettings,
+    checkTradingPeriod,
+    setNewTradingPeriod,
+    getCurrentPeriodInfo,
+    resetTradingPeriod,
     logTradingData,
     setupEnvFile,
     loadEnvironment,
     getVersion,
-    attemptRPCFailover
+    attemptRPCFailover,
+    devLog
 };

@@ -117,8 +117,8 @@ function calculateTradeAmount(balance, sentiment, tokenInfo) {
     try {
         const {
             SENTIMENT_MULTIPLIERS,
-            TRADE_SIZE_METHOD = 'STRATEGIC',
-            STRATEGIC_PERCENTAGE = 2.5
+            TRADE_SIZE_METHOD,
+            STRATEGIC_PERCENTAGE
         } = readSettings();
 
         if (!SENTIMENT_MULTIPLIERS || !SENTIMENT_MULTIPLIERS[sentiment]) {
@@ -132,35 +132,31 @@ function calculateTradeAmount(balance, sentiment, tokenInfo) {
             return 0;
         }
 
+        // Handle invalid TRADE_SIZE_METHOD
+        if (!['VARIABLE', 'STRATEGIC'].includes(TRADE_SIZE_METHOD)) {
+            console.error(`Invalid trade size method: ${TRADE_SIZE_METHOD}, defaulting to STRATEGIC`);
+        }
+
         if (TRADE_SIZE_METHOD === 'VARIABLE') {
-            // Original trading size calculation logic
             const rawAmount = balance * sentimentMultiplier;
             return Math.floor(rawAmount * (10 ** tokenInfo.DECIMALS));
-        } else if (TRADE_SIZE_METHOD === 'STRATEGIC') {
-            // Get both current balances
+        } else { // Default to STRATEGIC
             const wallet = getWallet();
             const { needsNewPeriod, currentBaseSizes } = checkTradingPeriod();
 
             if (needsNewPeriod) {
-                // Calculate new base trade sizes for both tokens
                 const baseSizes = setNewTradingPeriod(
                     wallet.solBalance,
                     wallet.usdcBalance,
                     STRATEGIC_PERCENTAGE
                 );
-
-                // Use the appropriate base size for the current token
                 const baseAmount = baseSizes[tokenInfo.NAME];
                 return Math.floor(baseAmount * (10 ** tokenInfo.DECIMALS));
             }
 
-            // Use existing base trade size for the current token
             const baseAmount = currentBaseSizes[tokenInfo.NAME];
             return Math.floor(baseAmount * (10 ** tokenInfo.DECIMALS));
         }
-
-        // Default to STRATEGIC if invalid method specified
-        return calculateTradeAmount(balance, sentiment, tokenInfo);
     } catch (error) {
         console.error('Error calculating trade amount:', error);
         return 0;

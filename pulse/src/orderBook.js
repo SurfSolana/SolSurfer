@@ -169,9 +169,12 @@ class OrderBook {
         this.trades.forEach(trade => {
             if (trade.status === 'open') {
                 if (trade.direction === 'buy') {
+                    // For buy positions, show unrealized loss if price goes down
                     trade.upnl = (currentPrice - trade.price) * trade.solAmount;
                 } else {
-                    trade.upnl = (trade.price - currentPrice) * trade.solAmount;
+                    // For sell positions, only show potential profit, not losses
+                    const potentialProfit = (trade.price - currentPrice) * trade.solAmount;
+                    trade.upnl = potentialProfit > 0 ? potentialProfit : 0;
                 }
             }
         });

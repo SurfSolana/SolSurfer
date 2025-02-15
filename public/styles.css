@@ -760,6 +760,20 @@ input.locked {
     display: inline-block;
 }
 
+.pnl-positive {
+    color: #00ff9d !important;  /* bright green */
+}
+
+.pnl-negative {
+    color: #ff4b4b !important;  /* bright red */
+}
+
+/* Ensure this applies to both the values in the metrics grid and orderbook */
+.data-value.pnl-negative,
+.data-value.pnl-positive {
+    font-weight: 500;
+}
+
 /* Type styles */
 .type-buy {
     color: #00ff9d;

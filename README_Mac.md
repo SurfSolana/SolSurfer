@@ -1,15 +1,35 @@
-# SolSurfer Installation Guide for macOS
+# Free Crypto Trading Bot: SolSurfer Self-Hosted Trading Suite - macOS Guide 🏄‍♂️🌊
 
-SolSurfer is an automated trading bot for SOL/USDC pairs on the Solana blockchain. This guide will walk you through the installation process on your Mac, starting from the absolute basics.
+![GitHub last commit](https://img.shields.io/github/last-commit/SurfSolana/SolSurfer)
+![GitHub issues](https://img.shields.io/github/issues/SurfSolana/SolSurfer)
+![GitHub number of milestones](https://img.shields.io/github/milestones/all/SurfSolana/SolSurfer)
+![GitHub stars](https://img.shields.io/github/stars/SurfSolana/SolSurfer?style=social)
+[![Twitter Follow](https://img.shields.io/twitter/follow/spuddya7x?style=social)](https://twitter.com/spuddya7x)
+
+[Join our Discord community](https://discord.gg/dpzudaBwSa) to discuss SolSurfer, get support, and stay updated on the latest developments.
+
+SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC trading on the Solana blockchain. What sets our bot apart from AI trading bots is our transparent approach - combining targeted machine learning for performance optimization with clear, understandable trading strategies. Our trading approach leverages Fear and Greed Index analysis with ML-optimized parameters, giving you the best of both worlds: advanced technology with complete clarity on how your trades are executed.
+
+## Features 🚀
+
+- ✅ Free and open source
+- 🏠 Self-hosted 
+- 🤖 ML-optimized parameters
+- 💼 Automated trading
+- 📊 Performance tracking
+- 🖥️ Web dashboard
+- 🔒 Security features
 
 ## Before You Start
 
 You'll need:
-
 - About $100 worth of SOL and USDC for trading
 - About 30 minutes of time
+- A Mac computer
 
-## Opening Terminal
+## macOS Installation Guide 🛠️
+
+### Opening Terminal
 
 Terminal is a program that lets you type commands to your Mac. To open it:
 
@@ -17,205 +37,234 @@ Terminal is a program that lets you type commands to your Mac. To open it:
 2. Type "Terminal"
 3. Click the Terminal app (it looks like a black box)
 
-You'll use Terminal for many of the following steps. Keep it open throughout the installation process.
+Keep Terminal open throughout the installation process.
 
-## Checking and Installing Required Tools
+### Required Tools Setup
 
-### 1. Homebrew
-
-Homebrew is a tool that helps install development related software on your Mac.
-
+#### 1. Homebrew
 Check if installed:
-
-```other
+```bash
 brew --version
 ```
 
-If you see "command not found", install it:
-
-```other
+If not found, install it:
+```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-After installation, you might need to restart Terminal.
-
-### 2. Node.js and npm
-
-Node.js lets you run JavaScript programs on your computer. npm helps install Node.js packages.
-
+#### 2. Node.js and npm
 Check if installed:
-
-```other
+```bash
 node --version
 npm --version
 ```
 
-If either command shows "command not found", install both:
-
-```other
+If not found, install both:
+```bash
 brew install node
 ```
 
-### 3. Git
-
-Git helps download and manage code.
-
+#### 3. Git
 Check if installed:
-
-```other
+```bash
 git --version
 ```
 
 If not found, install it:
-
-```other
+```bash
 brew install git
 ```
 
-## Required Accounts Setup
+### Required Accounts Setup
 
 1. **Solana Wallet**
    - Install [Phantom Wallet](https://phantom.app) from the App Store
    - Create a new wallet or import existing
    - Add SOL and USDC (minimum $50 worth of each)
    - [Guide to get your private key](https://help.phantom.com/hc/en-us/articles/28355165637011-Exporting-Your-Private-Key)
+
 2. **RPC URL**
    - Visit [Helius](https://dashboard.helius.dev/login)
    - Sign up for a free account
    - Create a new API key
    - Copy the RPC URL (starts with https://)
 
-## Installation Steps
+### Installation Steps
 
 1. Download SolSurfer:
-
-```other
+```bash
 git clone https://github.com/SurfSolana/SolSurfer.git
 ```
 
 2. Move into the SolSurfer folder:
-
-```other
+```bash
 cd solsurfer
 ```
 
 3. Install required packages:
-
-```other
+```bash
 npm install
 ```
 
-## Configuration
+### Configuration
 
 1. Create your settings file:
-
-```other
+```bash
 cp user/.env.example user/.env
 ```
 
 2. Open the settings file in TextEdit:
-
-```other
+```bash
 open -e user/.env
 ```
 
 3. Replace these lines with your information:
-
-```other
-# Before:
+```bash
 PRIVATE_KEY=your_wallet_private_key
 RPC_URL=your_solana_rpc_url
-ADMIN_PASSWORD=choose_a_secure_password
-PORT=3000
-
-# After (example - use your own values):
-PRIVATE_KEY=5KNsxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-RPC_URL=https://rpc-devnet.helius.xyz/v0/xxxxx
-ADMIN_PASSWORD=MySecurePassword123
+ADMIN_PASSWORD=your_web_interface_password
 PORT=3000
 ```
 
 4. Save the file (CMD + S) and close TextEdit
 5. Make the start script runnable:
-
-```other
+```bash
 chmod +x start_surfer.sh
 ```
 
-## Starting SolSurfer
+## Trading Strategy 📊
 
-1. Start the program:
+### PulseSurfer: Sentiment Trading
+Direct Sentiment Trading:
+- Buys in fear markets
+- Sells in greed periods
+- Holds in neutral markets
 
-```other
+Position Sizing:
+- Position sizing based on sentiment
+- Configurable multipliers for each sentiment level
+
+## Configuration Parameters 🔧
+
+### Sentiment Boundaries
+```json
+{
+    "SENTIMENT_BOUNDARIES": {
+        "EXTREME_FEAR": 20,    // FGI value below this is considered extreme fear
+        "FEAR": 75,           // FGI value below this is considered fear
+        "GREED": 82,          // FGI value above this is considered greed
+        "EXTREME_GREED": 89   // FGI value above this is considered extreme greed
+    }
+}
+```
+
+![Sentiment Boundaries](/boundarygraph.svg)
+
+### Sentiment Multipliers
+```json
+{
+    "SENTIMENT_MULTIPLIERS": {
+        "EXTREME_FEAR": 0.02,  // Position size multiplier during extreme fear (VARIABLE mode only)
+        "FEAR": 0.01,         // Position size multiplier during fear (VARIABLE mode only)
+        "GREED": 0.01,        // Position size multiplier during greed (VARIABLE mode only)
+        "EXTREME_GREED": 0.02  // Position size multiplier during extreme greed (VARIABLE mode only)
+    }
+}
+```
+
+### Trading Parameters
+```json
+{
+    "MIN_PROFIT_PERCENT": 0.2,          // Minimum profit percentage required to close a trade
+    "TRADE_COOLDOWN_MINUTES": 30,       // Minimum time between trades
+    "TRADE_SIZE_METHOD": "STRATEGIC",   // STRATEGIC or VARIABLE
+    "STRATEGIC_PERCENTAGE": 2.5,        // Base percentage of portfolio to trade when using STRATEGIC method
+    "MIN_SENTIMENT_CHANGE": 5           // Minimum FGI change required to trigger a new trade
+}
+```
+
+### Cost Settings
+```json
+{
+    "USER_MONTHLY_COST": 0,             // Monthly operational cost in USD (for APY calculations)
+    "DEVELOPER_TIP_PERCENTAGE": 0,      // Optional tip percentage for developers
+    "MONITOR_MODE": false               // Enable/disable trading (true = monitor only)
+}
+```
+
+### Position Sizing Systems
+
+The bot offers two methods for calculating position sizes when opening trades:
+
+**1. STRATEGIC Method (Default, Recommended)**
+- Takes a daily snapshot of your SOL and USDC balances every 24 hours
+- Uses STRATEGIC_PERCENTAGE to calculate fixed trade sizes for the next 24 hours
+- Example: With STRATEGIC_PERCENTAGE of 2.5%
+  - Day starts with 100 SOL and 1000 USDC
+  - Each trade that day will use 2.5 SOL or 25 USDC
+  - Next day, balances are re-snapshot and new trade sizes are calculated
+- Provides more consistent, predictable trading sizes
+
+**2. VARIABLE Method**
+- Calculates trade size dynamically for each trade based on current balance
+- Uses SENTIMENT_MULTIPLIERS as percentages of your current balance
+- Example: With Extreme Fear multiplier of 0.07 (7%)
+  - Current balance: 100 SOL
+  - Trade size: 7 SOL (7% of current balance)
+  - Next trade will use 7% of whatever the new balance is
+- More aggressive, adapts to changing balances immediately
+
+**Profit Taking (Both Methods)**
+- When closing profitable trades, the bot only sells the original purchase amount
+- Example:
+  - Buy 10 SOL at $10 ($100 total)
+  - Price rises to $15
+  - Bot sells only $100 worth (6.67 SOL)
+  - Keeps remaining 3.33 SOL as profit
+
+![Orderbook Example](/orderbook.png)
+
+## Running SolSurfer 🏃‍♂️
+
+Start the trading bot:
+```bash
 ./start_surfer.sh
 ```
 
-2. Choose your trading strategy when prompted:
-   - **PulseSurfer**: Trades based on market sentiment
-   - **WaveSurfer**: Trades based on price momentum
-3. View your dashboard:
-   - Open Safari or your preferred browser
-   - Go to: [http://localhost:3000](http://localhost:3000)
-   - Log in using the ADMIN_PASSWORD you set earlier
+Access the web interface:
+- Local: http://localhost:3000
+- Remote: Port forward your selected port and use your machine's Public IPv4 Address
 
-## Trading Setup
-
-1. Start with Test Mode:
-   - Open `user/settings.json` in TextEdit:
-
-```other
-open -e user/settings.json
-```
-
-2. Adjust trading settings:
-
-```json
-{
-  "SENTIMENT_BOUNDARIES": {
-    "EXTREME_FEAR": 15,
-    "FEAR": 35,
-    "GREED": 65,
-    "EXTREME_GREED": 85
-  },
-  "SENTIMENT_MULTIPLIERS": {
-    "EXTREME_FEAR": 0.05,
-    "FEAR": 0.03,
-    "GREED": 0.03,
-    "EXTREME_GREED": 0.05
-  }
-}
-```
+Log in using your configured ADMIN_PASSWORD
 
 ## Troubleshooting
 
 If you see "Permission denied":
-
-```other
+```bash
 sudo chmod +x start_surfer.sh
 ```
 
 If npm install fails:
-
-```other
+```bash
 npm cache clean --force
 npm install
 ```
 
 If you can't access the dashboard:
-
 - Change the port in your .env file to 3001 or 3002
 - Restart SolSurfer
 
-## Getting Help
+## Dashboard Features 📊
+The web interface provides:
+- Fear and Greed Index tracking
+- Transaction history
+- Portfolio metrics
+- Trade notifications
+- Analytics
 
-1. Join our community:
-   - [Discord](https://discord.gg/dpzudaBwSa)
-   - Follow [@spuddya7x](https://twitter.com/spuddya7x)
-   - [GitHub Issues](https://github.com/SurfSolana/SolSurfer/issues)
-2. Read more:
-   - Check the FAQ
-   - Review [Strategy Guides](./docs/strategies/)
-   - Read the Risk Disclaimer
+## Risk Disclaimer ⚠️
+
+Trading cryptocurrencies carries a high level of risk and may not be suitable for all investors. The high degree of leverage can work against you as well as for you. Before deciding to trade cryptocurrencies, you should carefully consider your investment objectives, level of experience, and risk appetite. The possibility exists that you could sustain a loss of some or all of your initial investment and therefore you should not invest money that you cannot afford to lose.
 
 ## Safety Tips
 
@@ -224,6 +273,26 @@ If you can't access the dashboard:
 - Keep your computer updated and secure
 - Regularly check for SolSurfer updates
 
-## License
+## Getting Help
 
-MIT License - See [LICENSE](./LICENSE) file for details
+1. Join our community:
+   - [Discord](https://discord.gg/dpzudaBwSa)
+   - Follow [@spuddya7x](https://twitter.com/spuddya7x)
+   - [GitHub Issues](https://github.com/SurfSolana/SolSurfer/issues)
+
+## License 📜
+
+This project is licensed under the MIT License - See [LICENSE](./LICENSE) file for details.
+
+## Author 👨‍💻
+
+SpuddyA7X
+
+GitHub: @SurfSolana
+Twitter: @SpuddyA7X
+
+## Show your support 🌟
+
+Give a ⭐️ if this project helped you!
+
+Happy trading with SolSurfer! 🏄‍♂️🌊

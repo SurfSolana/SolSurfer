@@ -143,26 +143,100 @@ PORT=3000
 ```
 
 Configure trading parameters in `settings.json` or via the web interface:
+
+## Configuration Parameters 🔧
+
+### Sentiment Boundaries
 ```json
-{
-  "SENTIMENT_BOUNDARIES": {
-    "EXTREME_FEAR": 15,
-    "FEAR": 35,
-    "GREED": 65,
-    "EXTREME_GREED": 85
-  },
-  "USER_MONTHLY_COST": 0,
-  "DEVELOPER_TIP_PERCENTAGE": 0,
-  "MONITOR_MODE": false,
-  
-  "SENTIMENT_MULTIPLIERS": {
-    "EXTREME_FEAR": 0.05,
-    "FEAR": 0.03,
-    "GREED": 0.03,
-    "EXTREME_GREED": 0.05
-  }
+"SENTIMENT_BOUNDARIES": {
+    "EXTREME_FEAR": 20,    // FGI value below this is considered extreme fear
+    "FEAR": 75,           // FGI value below this is considered fear
+    "GREED": 82,          // FGI value above this is considered greed
+    "EXTREME_GREED": 89   // FGI value above this is considered extreme greed
 }
 ```
+
+![Sentiment Boundaries](/boundarygraph.svg)
+
+### Sentiment Multipliers
+```json
+"SENTIMENT_MULTIPLIERS": {
+    "EXTREME_FEAR": 0.02,  // Position size multiplier during extreme fear (VARIABLE mode only)
+    "FEAR": 0.01,         // Position size multiplier during fear (VARIABLE mode only)
+    "GREED": 0.01,        // Position size multiplier during greed (VARIABLE mode only)
+    "EXTREME_GREED": 0.02  // Position size multiplier during extreme greed (VARIABLE mode only)
+}
+```
+
+### Trading Parameters
+```json
+{
+    "MIN_PROFIT_PERCENT": 0.2,          // Minimum profit percentage required to close a trade
+    "TRADE_COOLDOWN_MINUTES": 30,       // Minimum time between trades
+    "TRADE_SIZE_METHOD": "STRATEGIC",   // STRATEGIC or VARIABLE
+    "STRATEGIC_PERCENTAGE": 2.5,        // Base percentage of portfolio to trade when using STRATEGIC method
+    "MIN_SENTIMENT_CHANGE": 5           // Minimum FGI change required to trigger a new trade
+}
+```
+
+### Cost Settings
+```json
+{
+    "USER_MONTHLY_COST": 0,             // Monthly operational cost in USD (for APY calculations)
+    "DEVELOPER_TIP_PERCENTAGE": 0,      // Optional tip percentage for developers
+    "MONITOR_MODE": false               // Enable/disable trading (true = monitor only)
+}
+```
+
+### Parameter Explanations
+
+#### Sentiment Boundaries
+- **EXTREME_FEAR**: FGI value threshold for extreme fear conditions. Values below this trigger larger buy orders.
+- **FEAR**: Upper threshold for fear conditions. Values between this and EXTREME_FEAR trigger smaller buy orders.
+- **GREED**: Lower threshold for greed conditions. Values above this trigger sell orders.
+- **EXTREME_GREED**: Threshold for extreme greed. Values above this trigger larger sell orders.
+
+#### Trade Execution
+- **MIN_PROFIT_PERCENT**: The minimum profit percentage required before the bot will close a position.
+- **TRADE_COOLDOWN_MINUTES**: Enforced waiting period between trades to prevent overtrading.
+- **MIN_SENTIMENT_CHANGE**: Required change in FGI value to trigger a new trade, prevents small fluctuations from causing unnecessary trades.
+
+#### Position Sizing Systems
+
+The bot offers two methods for calculating position sizes when opening trades:
+
+**1. STRATEGIC Method (Default, Recommended)**
+- Takes a daily snapshot of your SOL and USDC balances every 24 hours
+- Uses STRATEGIC_PERCENTAGE to calculate fixed trade sizes for the next 24 hours
+- Example: With STRATEGIC_PERCENTAGE of 2.5%
+  - Day starts with 100 SOL and 1000 USDC
+  - Each trade that day will use 2.5 SOL or 25 USDC
+  - Next day, balances are re-snapshot and new trade sizes are calculated
+- Provides more consistent, predictable trading sizes
+
+**2. VARIABLE Method**
+- Calculates trade size dynamically for each trade based on current balance
+- Uses SENTIMENT_MULTIPLIERS as percentages of your current balance
+- Example: With Extreme Fear multiplier of 0.07 (7%)
+  - Current balance: 100 SOL
+  - Trade size: 7 SOL (7% of current balance)
+  - Next trade will use 7% of whatever the new balance is
+- More aggressive, adapts to changing balances immediately
+
+**Profit Taking (Both Methods)**
+- When closing profitable trades, the bot only sells the original purchase amount
+- Example:
+  - Buy 10 SOL at $10 ($100 total)
+  - Price rises to $15
+  - Bot sells only $100 worth (6.67 SOL)
+  - Keeps remaining 3.33 SOL as profit
+
+![Orderbook Example](/orderbook.png)
+
+#### Operational Settings
+- **USER_MONTHLY_COST**: Used for accurate APY calculations, factoring in operational expenses
+- **DEVELOPER_TIP_PERCENTAGE**: Optional percentage for developer support
+- **MONITOR_MODE**: When enabled, bot will track market but not execute trades
 
 ## Running SolSurfer 🏃‍♂️
 
@@ -185,7 +259,6 @@ Log in using your configured ADMIN_PASSWORD
 ## Dashboard Features 📊
 The web interface provides:
 - Fear and Greed Index tracking
-- Active sentiment streaks
 - Transaction history
 - Portfolio metrics
 - Trade notifications

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+    <!-- Background -->
+    <rect width="800" height="200" fill="#1E1E2E"/>
+    
+    <!-- Gradient bar -->
+    <defs>
+        <linearGradient id="sentimentGradient" x1="0" x2="100%" y1="0" y2="0">
+            <stop offset="0%" style="stop-color:#660000"/>
+            <stop offset="20%" style="stop-color:#FF4136"/>
+            <stop offset="40%" style="stop-color:#FF851B"/>
+            <stop offset="60%" style="stop-color:#FFDC00"/>
+            <stop offset="80%" style="stop-color:#2ECC40"/>
+            <stop offset="100%" style="stop-color:#0074D9"/>
+        </linearGradient>
+    </defs>
+    
+    <!-- Main sentiment bar -->
+    <rect x="50" y="80" width="700" height="40" fill="url(#sentimentGradient)" rx="20"/>
+    
+    <!-- Boundary markers -->
+    <g stroke="#1E1E2E" stroke-width="4">
+        <line x1="190" x2="190" y1="75" y2="125" stroke="#00B4FF"/>
+        <line x1="330" x2="330" y1="75" y2="125" stroke="#00B4FF"/>
+        <line x1="470" x2="470" y1="75" y2="125" stroke="#00B4FF"/>
+        <line x1="610" x2="610" y1="75" y2="125" stroke="#00B4FF"/>
+    </g>
+    
+    <!-- Scale numbers under boundaries -->
+    <g fill="white" font-family="Arial" font-size="14" text-anchor="middle">
+        <text x="190" y="155">20</text>
+        <text x="330" y="155">40</text>
+        <text x="470" y="155">60</text>
+        <text x="610" y="155">80</text>
+    </g>
+    
+    <!-- Sentiment zone labels -->
+    <g font-family="Arial" font-size="14" font-weight="bold" text-anchor="middle">
+        <text x="120" y="60" fill="#FF4136">Extreme Fear</text>
+        <text x="260" y="60" fill="#FF851B">Fear</text>
+        <text x="400" y="60" fill="#FFDC00">Neutral</text>
+        <text x="540" y="60" fill="#2ECC40">Greed</text>
+        <text x="680" y="60" fill="#0074D9">Extreme Greed</text>
+    </g>
+    
+    <!-- Action arrows and labels -->
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="white"/>
+        </marker>
+    </defs>
+    
+    <g font-family="Arial" font-size="12" text-anchor="middle">
+        <!-- Strong Buy arrow -->
+        <path d="M120,25 L120,40" stroke="#FF4136" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <text x="120" y="20" fill="#FF4136">Strong Buy</text>
+        
+        <!-- Buy arrow -->
+        <path d="M260,25 L260,40" stroke="#FF851B" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <text x="260" y="20" fill="#FF851B">Buy</text>
+        
+        <!-- Sell arrow -->
+        <path d="M540,25 L540,40" stroke="#2ECC40" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <text x="540" y="20" fill="#2ECC40">Sell</text>
+        
+        <!-- Strong Sell arrow -->
+        <path d="M680,25 L680,40" stroke="#0074D9" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <text x="680" y="20" fill="#0074D9">Strong Sell</text>
+    </g>
+</svg>

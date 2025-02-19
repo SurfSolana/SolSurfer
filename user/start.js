@@ -21,7 +21,7 @@ function verifyBotFiles() {
 }
 
 function startTrading() {
-    console.log('Starting PulseSurfer...');
+    //console.log('Starting PulseSurfer...');
     try {
         require(PULSE_PATH);
     } catch (error) {

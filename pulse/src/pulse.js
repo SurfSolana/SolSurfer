@@ -3,7 +3,7 @@ const OrderBook = require('./orderBook');
 const { executeSwap, executeExactOutSwap, updatePortfolioBalances, USDC, SOL, updatePositionFromSwap, logPositionUpdate, cancelPendingBundle, calculateTradeAmount } = require('./trading');
 const { fetchFearGreedIndex, getSentiment, fetchPrice, BASE_PRICE_URL } = require('./api');
 const { getTimestamp, formatTime, getWaitTime, logTradingData, getVersion, loadEnvironment, devLog } = require('./utils');
-const { server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState, orderBook } = require('./pulseServer');
+const { startServer, server, paramUpdateEmitter, setInitialData, addRecentTrade, emitTradingData, readSettings, getMonitorMode, clearRecentTrades, saveState, loadState, orderBook } = require('./pulseServer');
 const { setWallet, setConnection, getWallet, getConnection } = require('./globalState');
 const cliProgress = require('cli-progress');
 
@@ -413,6 +413,9 @@ async function initialize() {
 
     clearTimeout(globalTimeoutId);
 
+    // Use the startServer function that handles version checking
+    await startServer();
+
     const savedState = loadState();
     devLog("SaveState:", savedState ? "Found" : "Not found");
 
@@ -439,11 +442,6 @@ async function initialize() {
 
     MONITOR_MODE = getMonitorMode();
     console.log("Monitor mode:", MONITOR_MODE ? "Enabled" : "Disabled");
-
-    const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () => {
-        console.log(`\nLocal Server Running On: http://localhost:${PORT}`);
-    });
 
     await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
     await main();

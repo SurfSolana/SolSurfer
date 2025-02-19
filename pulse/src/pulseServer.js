@@ -11,12 +11,35 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const session = require('express-session');
 const axios = require('axios');
+const readline = require('readline');
 const { getVersion, devLog } = require('./utils');
 const { getWallet, getConnection } = require('./globalState');
 const { PublicKey } = require('@solana/web3.js');
 const OrderBook = require('./orderBook');
 
 let orderBook = new OrderBook();
+
+// Settings functionality
+const SETTINGS_ORDER = [
+  "VERSION",
+  "SENTIMENT_BOUNDARIES",
+  "SENTIMENT_MULTIPLIERS",
+  "MIN_PROFIT_PERCENT",
+  "TRADE_COOLDOWN_MINUTES",
+  "TRADE_SIZE_METHOD",
+  "STRATEGIC_PERCENTAGE",
+  "USER_MONTHLY_COST",
+  "DEVELOPER_TIP_PERCENTAGE",
+  "MONITOR_MODE"
+];
+
+const NESTED_ORDERS = {
+  "SENTIMENT_BOUNDARIES": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"],
+  "SENTIMENT_MULTIPLIERS": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"]
+};
+
+const SETTINGS_PATH = path.join(__dirname, '..', '..', 'user', 'settings.json');
+const STATE_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'saveState.json');
 
 // Function to check and create necessary files
 function ensureRequiredFiles() {
@@ -37,33 +60,50 @@ function ensureRequiredFiles() {
     filesCreated = true;
   }
 
-  const DEFAULT_SETTINGS = {
+  const currentVersion = getVersion();
+  const DEFAULT_SETTINGS = orderSettings({
+    VERSION: currentVersion,
     SENTIMENT_BOUNDARIES: {
       EXTREME_FEAR: 15,
       FEAR: 35,
       GREED: 65,
       EXTREME_GREED: 85
     },
-    USER_MONTHLY_COST: 0,
-    DEVELOPER_TIP_PERCENTAGE: 0,
-    MONITOR_MODE: false,
-    DEVELOPER_MODE: false,
-    MIN_PROFIT_PERCENT: 0.2,
-    TRADE_COOLDOWN_MINUTES: 30,
-    TRADE_SIZE_METHOD: "STRATEGIC",
-    STRATEGIC_PERCENTAGE: 2.5,
     SENTIMENT_MULTIPLIERS: {
       EXTREME_FEAR: 0.04,
       FEAR: 0.02,
       GREED: 0.02,
       EXTREME_GREED: 0.04
-    }
-  };
+    },
+    MIN_PROFIT_PERCENT: 0.2,
+    TRADE_COOLDOWN_MINUTES: 30,
+    TRADE_SIZE_METHOD: "STRATEGIC",
+    STRATEGIC_PERCENTAGE: 2.5,
+    USER_MONTHLY_COST: 0,
+    DEVELOPER_TIP_PERCENTAGE: 0,
+    MONITOR_MODE: false,
+  });
 
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
     devLog('settings.json file created with default values.');
     filesCreated = true;
+  } else {
+    // Settings file exists - check version and settings
+    const settings = readSettings();
+    if (!settings) {
+      console.error('Error reading settings.json. Creating new file.');
+      fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
+      filesCreated = true;
+    } else {
+      // Always check for missing settings, regardless of version
+      const missingSettings = checkMissingSettings(settings, DEFAULT_SETTINGS);
+      
+      if (Object.keys(missingSettings).length > 0 || settings.VERSION !== currentVersion) {
+        // We found missing settings or version changed - ask user what to do
+        return handleVersionUpgrade(settings, missingSettings, DEFAULT_SETTINGS, currentVersion, settingsPath);
+      }
+    }
   }
 
   if (filesCreated) {
@@ -72,6 +112,116 @@ function ensureRequiredFiles() {
   }
 
   return true;
+}
+
+function deepMerge(target, source) {
+  const output = {...target};
+  
+  for (const key in source) {
+    if (
+      typeof source[key] === 'object' && 
+      source[key] !== null &&
+      !Array.isArray(source[key]) &&
+      typeof output[key] === 'object' &&
+      output[key] !== null
+    ) {
+      output[key] = deepMerge(output[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  
+  return output;
+}
+
+function checkMissingSettings(current, defaults) {
+  const missing = {};
+  
+  for (const key in defaults) {
+    // Skip VERSION key
+    if (key === 'VERSION') continue;
+    
+    if (!(key in current)) {
+      // Setting is completely missing
+      missing[key] = defaults[key];
+    } else if (
+      typeof defaults[key] === 'object' && 
+      defaults[key] !== null && 
+      typeof current[key] === 'object' && 
+      current[key] !== null &&
+      !Array.isArray(defaults[key])
+    ) {
+      // Recursively check nested objects
+      const nestedMissing = checkMissingSettings(current[key], defaults[key]);
+      if (Object.keys(nestedMissing).length > 0) {
+        missing[key] = nestedMissing;
+      }
+    }
+  }
+  
+  return missing;
+}
+
+function handleVersionUpgrade(settings, missingSettings, defaultSettings, currentVersion, settingsPath) {
+  return new Promise((resolve) => {
+    console.log(`\nSettings file was created with v${settings.VERSION || 'unknown'} and current version is v${currentVersion}`);
+    console.log(`\n(Settings.json file path: ${settingsPath})`);
+    if (Object.keys(missingSettings).length > 0) {
+      console.log('\nThe following settings are missing in your configuration:');
+      
+      // Format and display missing settings names only
+      const missingKeys = Object.keys(missingSettings);
+      missingKeys.forEach(key => {
+        if (typeof missingSettings[key] === 'object' && !Array.isArray(missingSettings[key])) {
+          // For nested objects like SENTIMENT_BOUNDARIES
+          const nestedKeys = Object.keys(missingSettings[key]);
+          console.log(`  - ${key}`);
+          nestedKeys.forEach(nestedKey => {
+            console.log(`    * ${nestedKey}`);
+          });
+        } else {
+          // For simple values
+          console.log(`  - ${key}`);
+        }
+      });
+    } else {
+      console.log('\nNo settings are missing, but version has changed.');
+    }
+    
+    console.log('\nOptions:');
+    console.log('1. Create new settings file (delete current settings)');
+    console.log('2. Insert missing settings (keep existing settings)');
+    
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    
+    rl.question('\nEnter your choice (1 or 2): ', (answer) => {
+      rl.close();
+      
+      if (answer === '1') {
+        // User chose to replace settings
+        const orderedDefaultSettings = orderSettings(defaultSettings);
+        fs.writeFileSync(settingsPath, JSON.stringify(orderedDefaultSettings, null, 2));
+        console.log('Created new settings file with defaults.');
+        resolve(true);
+      } else if (answer === '2') {
+        // User chose to update only missing settings
+        const updatedSettings = deepMerge(settings, missingSettings);
+        updatedSettings.VERSION = currentVersion;
+        const orderedUpdatedSettings = orderSettings(updatedSettings);
+        fs.writeFileSync(settingsPath, JSON.stringify(orderedUpdatedSettings, null, 2));
+        console.log('Updated settings file with missing values.');
+        resolve(true);
+      } else {
+        console.log('Invalid choice. Please enter 1 or 2.');
+        // Recursively ask again
+        handleVersionUpgrade(settings, missingSettings, defaultSettings, currentVersion, settingsPath)
+          .then(resolve);
+      }
+    });
+  });
 }
 
 // Function to validate .env contents
@@ -106,26 +256,7 @@ function validateEnvContents() {
   return true;
 }
 
-// Call the function to ensure required files exist
-if (!ensureRequiredFiles()) {
-  console.log('Exiting to allow configuration updates. Please run the application again after updating the configuration files in the /user folder.');
-  process.exit(0);
-}
-
-// Load environment variables
-dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
-
-// Validate .env contents
-if (!validateEnvContents()) {
-  console.log('Exiting due to invalid .env configuration. Please update the .env file and run the application again.');
-  process.exit(1);
-}
-
 const app = express();
-
-// Settings functionality
-const SETTINGS_PATH = path.join(__dirname, '..', '..', 'user', 'settings.json');
-const STATE_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'saveState.json');
 
 function readSettings() {
   try {
@@ -144,18 +275,69 @@ function getMonitorMode() {
 
 function writeSettings(settings) {
   try {
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+    // Order the settings before writing
+    const orderedSettings = orderSettings(settings);
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(orderedSettings, null, 2));
     devLog('Settings updated successfully.');
   } catch (error) {
     console.error('Error writing settings.json:', error);
   }
 }
 
+function orderSettings(settings) {
+  const orderedSettings = {};
+  
+  // Order top-level keys
+  SETTINGS_ORDER.forEach(key => {
+    if (key in settings) {
+      // If this is a nested object we want to order
+      if (typeof settings[key] === 'object' && !Array.isArray(settings[key]) && key in NESTED_ORDERS) {
+        const nestedOrder = NESTED_ORDERS[key];
+        const orderedNested = {};
+        
+        // Order the nested keys
+        nestedOrder.forEach(nestedKey => {
+          if (nestedKey in settings[key]) {
+            orderedNested[nestedKey] = settings[key][nestedKey];
+          }
+        });
+        
+        // Add any keys not in our nested order
+        Object.keys(settings[key]).forEach(nestedKey => {
+          if (!nestedOrder.includes(nestedKey)) {
+            orderedNested[nestedKey] = settings[key][nestedKey];
+          }
+        });
+        
+        orderedSettings[key] = orderedNested;
+      } else {
+        orderedSettings[key] = settings[key];
+      }
+    }
+  });
+  
+  // Add any keys not in our order
+  Object.keys(settings).forEach(key => {
+    if (!SETTINGS_ORDER.includes(key)) {
+      orderedSettings[key] = settings[key];
+    }
+  });
+  
+  return orderedSettings;
+}
+
 function updateSettings(newSettings) {
   const currentSettings = readSettings();
+  // Don't overwrite VERSION with user settings
+  const versionToKeep = currentSettings.VERSION;
   const updatedSettings = { ...currentSettings, ...newSettings };
+  
+  // Restore VERSION from before the update
+  if (versionToKeep) {
+    updatedSettings.VERSION = versionToKeep;
+  }
 
-  //ensure tip is at least 0
+  // ensure tip is at least 0
   updatedSettings.DEVELOPER_TIP_PERCENTAGE = Math.max(0, updatedSettings.DEVELOPER_TIP_PERCENTAGE);
 
   // ensure MONITOR_MODE is a boolean
@@ -163,6 +345,32 @@ function updateSettings(newSettings) {
 
   writeSettings(updatedSettings);
   return updatedSettings;
+}
+
+async function startServer() {
+  // Check required files first and handle version updates
+  const checkResult = await ensureRequiredFiles();
+  if (!checkResult) {
+      console.log('Exiting to allow configuration updates. Please run the application again after updating the configuration files in the /user folder.');
+      process.exit(0);
+  }
+  
+  // Load environment variables
+  dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
+  
+  // Validate .env contents  
+  if (!validateEnvContents()) {
+      console.log('Exiting due to invalid .env configuration. Please update the .env file and run the application again.');
+      process.exit(1);
+  }
+  
+  // Set up server
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+      console.log(`\nLocal Server Running On: http://localhost:${PORT}`);
+  });
+  
+  return true;
 }
 
 let tradingParams = readSettings();
@@ -606,6 +814,7 @@ function formatTime(milliseconds) {
 }
 
 module.exports = {
+  startServer,
   server,
   io,
   paramUpdateEmitter,

@@ -1,4 +1,4 @@
-# Free Crypto Trading Bot: SolSurfer Self-Hosted Trading Suite 🏄‍♂️🌊
+# SolSurfer: Free Crypto Trading Bot for Solana | Self-Hosted Trading Suite 🏄‍♂️
 
 ![GitHub last commit](https://img.shields.io/github/last-commit/SurfSolana/SolSurfer)
 ![GitHub issues](https://img.shields.io/github/issues/SurfSolana/SolSurfer)
@@ -29,6 +29,7 @@ SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC 
 - [Full Setup](#full-setup-%EF%B8%8F)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
+  - [Configuration Parameters](#configuration-parameters-)
 - [Running SolSurfer](#running-solsurfer-%EF%B8%8F)
 - [Dashboard Features](#dashboard-features-)
 - [Risk Disclaimer](#risk-disclaimer-%EF%B8%8F)

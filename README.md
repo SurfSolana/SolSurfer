@@ -64,9 +64,10 @@ copy user\.env.example user\.env
 # Mac/Linux:
 cp user/.env.example user/.env
 # Edit with your details:
-# PRIVATE_KEY=your_wallet_private_key
-# RPC_URL=your_solana_rpc_url
-# ADMIN_PASSWORD=your_web_interface_password
+# PRIVATE_KEY=
+# PRIMARY_RPC=
+# SECONDARY_RPC=        # Optional: Recommended for improved reliability
+# ADMIN_PASSWORD=
 # PORT=3000
 ```
 4.  **Launch**

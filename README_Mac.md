@@ -187,7 +187,7 @@ Position Sizing:
 ```json
 {
     "USER_MONTHLY_COST": 0,             // Monthly operational cost in USD (for APY calculations)
-    "DEVELOPER_TIP_PERCENTAGE": 0,      // Optional tip percentage for developers
+    "DEVELOPER_TIP_PERCENTAGE": 0.029,  // Recommended Tip to Support SolSurfer Dev and to Earn Bubbles
     "MONITOR_MODE": false               // Enable/disable trading (true = monitor only)
 }
 ```

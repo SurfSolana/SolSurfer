@@ -185,7 +185,7 @@ Configure trading parameters in `settings.json` or via the web interface:
 ```json
 {
     "USER_MONTHLY_COST": 0,             // Monthly operational cost in USD (for APY calculations)
-    "DEVELOPER_TIP_PERCENTAGE": 0,      // Optional tip percentage for developers
+    "DEVELOPER_TIP_PERCENTAGE": 0.029,  // Recommended Tip to Support SolSurfer Development and earn Bubbles
     "MONITOR_MODE": false               // Enable/disable trading (true = monitor only)
 }
 ```
@@ -237,7 +237,7 @@ The bot offers two methods for calculating position sizes when opening trades:
 
 #### Operational Settings
 - **USER_MONTHLY_COST**: Used for accurate APY calculations, factoring in operational expenses
-- **DEVELOPER_TIP_PERCENTAGE**: Optional percentage for developer support
+- **DEVELOPER_TIP_PERCENTAGE**: Supports SolSurfer Development and earns Bubbles
 - **MONITOR_MODE**: When enabled, bot will track market but not execute trades
 
 ## Running SolSurfer 🏃‍♂️

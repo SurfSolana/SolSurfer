@@ -1,6 +1,6 @@
 {
   "name": "solsurfer",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "description": "",
   "main": "start.js",
   "keywords": [],
@@ -28,6 +28,7 @@
     "fs": "^0.0.1-security",
     "helmet": "^7.1.0",
     "http": "^0.0.1-security",
+    "papaparse": "^5.5.2",
     "socket.io": "^4.7.5"
   },
   "scripts": {

@@ -18,7 +18,7 @@ const { PublicKey } = require('@solana/web3.js');
 const OrderBook = require('./orderBook');
 
 let orderBook = new OrderBook();
-
+let tradingParams = {};
 // Settings functionality
 const SETTINGS_ORDER = [
   "VERSION",
@@ -43,75 +43,184 @@ const STATE_FILE_PATH = path.join(__dirname, '..', '..', 'user', 'saveState.json
 
 // Function to check and create necessary files
 function ensureRequiredFiles() {
-  const envPath = path.join(__dirname, '..', '..', 'user', '.env');
-  const settingsPath = path.join(__dirname, '..', '..', 'user', 'settings.json');
-  let filesCreated = false;
-
-  if (!fs.existsSync(envPath)) {
-    const defaultEnvContent = `
-    PRIMARY_RPC=
-    SECONDARY_RPC=        # Optional: Recommended for improved reliability
-    PRIVATE_KEY=
-    ADMIN_PASSWORD=
-    PORT=3000
-    `;
-    fs.writeFileSync(envPath, defaultEnvContent.trim());
-    devLog('.env file created. Please fill in the required values before running the application again.');
-    filesCreated = true;
-  }
-
-  const currentVersion = getVersion();
-  const DEFAULT_SETTINGS = orderSettings({
-    VERSION: currentVersion,
-    SENTIMENT_BOUNDARIES: {
-      EXTREME_FEAR: 15,
-      FEAR: 35,
-      GREED: 65,
-      EXTREME_GREED: 85
-    },
-    SENTIMENT_MULTIPLIERS: {
-      EXTREME_FEAR: 0.04,
-      FEAR: 0.02,
-      GREED: 0.02,
-      EXTREME_GREED: 0.04
-    },
-    MIN_PROFIT_PERCENT: 0.2,
-    TRADE_COOLDOWN_MINUTES: 30,
-    TRADE_SIZE_METHOD: "STRATEGIC",
-    STRATEGIC_PERCENTAGE: 2.5,
-    USER_MONTHLY_COST: 0,
-    DEVELOPER_TIP_PERCENTAGE: 0.029,
-    MONITOR_MODE: false,
-  });
-
-  if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-    devLog('settings.json file created with default values.');
-    filesCreated = true;
-  } else {
-    // Settings file exists - check version and settings
-    const settings = readSettings();
-    if (!settings) {
-      console.error('Error reading settings.json. Creating new file.');
-      fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-      filesCreated = true;
-    } else {
-      // Always check for missing settings, regardless of version
-      const missingSettings = checkMissingSettings(settings, DEFAULT_SETTINGS);
-      
-      if (Object.keys(missingSettings).length > 0 || settings.VERSION !== currentVersion) {
-        // We found missing settings or version changed - ask user what to do
-        return handleVersionUpgrade(settings, missingSettings, DEFAULT_SETTINGS, currentVersion, settingsPath);
+  return new Promise(async (resolve) => {
+    const envPath = path.join(__dirname, '..', '..', 'user', '.env');
+    const settingsPath = path.join(__dirname, '..', '..', 'user', 'settings.json');
+    let filesCreated = false;
+    let settingsCreated = false;
+    let confirmDisplayed = false;
+    
+    // Make sure the user directory exists
+    const userDir = path.join(__dirname, '..', '..', 'user');
+    if (!fs.existsSync(userDir)) {
+      try {
+        fs.mkdirSync(userDir, { recursive: true });
+        console.log('Created user directory');
+      } catch (error) {
+        console.error('Error creating user directory:', error);
+        resolve(false);
+        return;
       }
     }
-  }
 
-  if (filesCreated) {
-    console.log('New configuration files have been created. Please review and update them as necessary before running the application again.');
-    return false;
-  }
+    // Check if .env file exists and create it if it doesn't
+    if (!fs.existsSync(envPath)) {
+      const defaultEnvContent = `
+PRIMARY_RPC=
+SECONDARY_RPC=        # Optional: Recommended for improved reliability
+PRIVATE_KEY=
+ADMIN_PASSWORD=
+PORT=3000
+      `;
+      try {
+        fs.writeFileSync(envPath, defaultEnvContent.trim());
+        console.log('.env file created. Please fill in the required values before running the application again.');
+        filesCreated = true;
+      } catch (error) {
+        console.error('Error creating .env file:', error);
+        resolve(false);
+        return;
+      }
+    }
 
-  return true;
+    const currentVersion = getVersion();
+    const DEFAULT_SETTINGS = orderSettings({
+      VERSION: currentVersion,
+      SENTIMENT_BOUNDARIES: {
+        EXTREME_FEAR: 15,
+        FEAR: 35,
+        GREED: 65,
+        EXTREME_GREED: 85
+      },
+      SENTIMENT_MULTIPLIERS: {
+        EXTREME_FEAR: 0.04,
+        FEAR: 0.02,
+        GREED: 0.02,
+        EXTREME_GREED: 0.04
+      },
+      MIN_PROFIT_PERCENT: 0.2,
+      TRADE_COOLDOWN_MINUTES: 30,
+      TRADE_SIZE_METHOD: "STRATEGIC",
+      STRATEGIC_PERCENTAGE: 2.5,
+      USER_MONTHLY_COST: 0,
+      DEVELOPER_TIP_PERCENTAGE: 0.029,
+      MONITOR_MODE: false,
+    });
+
+    // Check if settings.json file exists
+    if (!fs.existsSync(settingsPath)) {
+      // Create the settings file with default values
+      try {
+        fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
+        console.log('settings.json file created with default values.');
+        settingsCreated = true;
+        filesCreated = true;
+      } catch (error) {
+        console.error('Error creating settings.json:', error);
+        resolve(false);
+        return;
+      }
+      
+      // If the .env file doesn't exist with valid values, we need to exit
+      if (filesCreated && !fs.existsSync(envPath)) {
+        console.log('New configuration files have been created. Please review and update them as necessary before running the application again.');
+        resolve(false);
+        return;
+      }
+      
+      // If only settings.json was created, ask the user if they want to continue
+      if (settingsCreated && !confirmDisplayed) {
+        confirmDisplayed = true;
+        // Create readline interface for user input
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        
+        console.log('\n\x1b[32m%s\x1b[0m', 'Settings.json did not exist, so we generated it with default parameters.');
+        console.log('\x1b[32m%s\x1b[0m', 'You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.');
+        
+        rl.question('\nConfirm Starting PulseSurfer? (Y/n): ', (answer) => {
+          rl.close();
+          
+          if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes' || answer === '') {
+            // User wants to continue with default settings
+            console.log('Starting with default settings...');
+            resolve(true);
+          } else {
+            // User wants to exit and modify settings
+            console.log('Exiting to allow settings modification. Run the application again after updating the configuration files.');
+            resolve(false);
+          }
+        });
+        return;
+      }
+    } else {
+      // Settings file exists - check version and settings
+      try {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        
+        // Always check for missing settings, regardless of version
+        const missingSettings = checkMissingSettings(settings, DEFAULT_SETTINGS);
+        
+        if (Object.keys(missingSettings).length > 0 || settings.VERSION !== currentVersion) {
+          // We found missing settings or version changed - ask user what to do
+          const upgradeResult = await handleVersionUpgrade(settings, missingSettings, DEFAULT_SETTINGS, currentVersion, settingsPath);
+          resolve(upgradeResult);
+          return;
+        }
+      } catch (error) {
+        console.error('Error reading or parsing settings.json:', error);
+        console.log('Creating new settings.json file with default values.');
+        try {
+          fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2));
+          filesCreated = true;
+          settingsCreated = true;
+          
+          // Ask the user if they want to continue with the newly created settings
+          if (!confirmDisplayed) {
+            confirmDisplayed = true;
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout
+            });
+            
+            console.log('\n\x1b[32m%s\x1b[0m', 'Settings.json was corrupted, so we generated a new one with default parameters.');
+            console.log('\x1b[32m%s\x1b[0m', 'You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.');
+            
+            rl.question('\nConfirm Starting PulseSurfer? (Y/n): ', (answer) => {
+              rl.close();
+              
+              if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes' || answer === '') {
+                // User wants to continue with default settings
+                console.log('Starting with default settings...');
+                resolve(true);
+              } else {
+                // User wants to exit and modify settings
+                console.log('Exiting to allow settings modification. Run the application again after updating the configuration files.');
+                resolve(false);
+              }
+            });
+            return;
+          }
+        } catch (writeError) {
+          console.error('Failed to create new settings.json file:', writeError);
+          resolve(false);
+          return;
+        }
+      }
+    }
+
+    // If we've created .env file (which requires user configuration), we should exit
+    if (filesCreated && !settingsCreated) {
+      console.log('New .env file has been created. Please fill in the required values before running the application again.');
+      resolve(false);
+      return;
+    }
+
+    // All checks passed, we can continue
+    resolve(true);
+  });
 }
 
 function deepMerge(target, source) {
@@ -260,17 +369,32 @@ const app = express();
 
 function readSettings() {
   try {
+    if (!fs.existsSync(SETTINGS_PATH)) {
+      // Don't log an error, just return null
+      return null;
+    }
+    
     const settingsData = fs.readFileSync(SETTINGS_PATH, 'utf8');
     return JSON.parse(settingsData);
   } catch (error) {
-    console.error('Error reading settings.json:', error);
+    // Only log if it's not a "file not found" error
+    if (error.code !== 'ENOENT') {
+      console.error('Error reading settings.json:', error);
+    }
     return null;
   }
 }
 
 function getMonitorMode() {
-  const settings = readSettings();
-  return settings.MONITOR_MODE === true;
+  try {
+    const settings = readSettings();
+    // Return false as default if settings is null or MONITOR_MODE is not set
+    if (!settings) return false;
+    return settings.MONITOR_MODE === true;
+  } catch (error) {
+    // Silently fail and return default value
+    return false;
+  }
 }
 
 function writeSettings(settings) {
@@ -348,32 +472,44 @@ function updateSettings(newSettings) {
 }
 
 async function startServer() {
-  // Check required files first and handle version updates
-  const checkResult = await ensureRequiredFiles();
-  if (!checkResult) {
-      console.log('Exiting to allow configuration updates. Please run the application again after updating the configuration files in the /user folder.');
+  try {
+    // Check required files first and handle version updates
+    const checkResult = await ensureRequiredFiles();
+    if (!checkResult) {
+      // Exit without showing additional error messages
       process.exit(0);
-  }
-  
-  // Load environment variables
-  dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
-  
-  // Validate .env contents  
-  if (!validateEnvContents()) {
+    }
+    
+    // Now that we've ensured the settings file exists, we can safely read it
+    tradingParams = readSettings();
+    if (!tradingParams) {
+      console.error('Failed to read settings after creation. Please check file permissions.');
+      process.exit(1);
+    }
+    
+    // Load environment variables
+    dotenv.config({ path: path.join(__dirname, '..', '..', 'user', '.env') });
+    
+    // Validate .env contents  
+    if (!validateEnvContents()) {
       console.log('Exiting due to invalid .env configuration. Please update the .env file and run the application again.');
       process.exit(1);
-  }
-  
-  // Set up server
-  const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => {
+    }
+    
+    // Set up server
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, () => {
       console.log(`\nLocal Server Running On: http://localhost:${PORT}`);
-  });
-  
-  return true;
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error during server startup:', error);
+    process.exit(1);
+  }
 }
 
-let tradingParams = readSettings();
+//let tradingParams = readSettings();
 
 // Middleware setup
 app.use(cors());

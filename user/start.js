@@ -11,6 +11,12 @@ const rl = readline.createInterface({
 const ROOT_DIR = path.join(__dirname, '..');
 const PULSE_PATH = path.join(ROOT_DIR, 'pulse/src/pulse.js');
 
+// Suppress the "bigint: Failed to load bindings" message by modifying environment
+process.env.NODE_OPTIONS = process.env.NODE_OPTIONS || '';
+if (!process.env.NODE_OPTIONS.includes('--no-warnings')) {
+  process.env.NODE_OPTIONS += ' --no-warnings';
+}
+
 // Verify bot files exist
 function verifyBotFiles() {
     if (!fs.existsSync(PULSE_PATH)) {
@@ -21,9 +27,28 @@ function verifyBotFiles() {
 }
 
 function startTrading() {
-    //console.log('Starting PulseSurfer...');
     try {
-        require(PULSE_PATH);
+        // Use child_process to explicitly spawn a new process with the --no-warnings flag
+        const { spawn } = require('child_process');
+        const pulse = spawn('node', ['--no-warnings', PULSE_PATH], {
+            stdio: 'inherit',  // This will pipe stdin/stdout/stderr between parent and child
+            env: process.env   // Pass along environment variables
+        });
+        
+        // Listen for the process exit
+        pulse.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`PulseSurfer exited with code ${code}`);
+                process.exit(code);
+            }
+            process.exit(0);
+        });
+        
+        // Handle errors
+        pulse.on('error', (err) => {
+            console.error('Failed to start PulseSurfer:', err);
+            process.exit(1);
+        });
     } catch (error) {
         console.error('Error starting PulseSurfer:', error);
         process.exit(1);

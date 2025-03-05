@@ -62,6 +62,7 @@ function promptForStart() {
             rl.close();
             process.exit(0);
         } else {
+            process.stdout.write('\x1b[0m'); // Reset terminal colors back to white
             rl.close();
             startTrading();
         }

@@ -19,6 +19,7 @@ cd /d "%~dp0"
 echo Starting SolSurfer...
 echo.
 node user/start.js
+color 07
 
 :: If the script exits with an error, pause to show the error message
 if %ERRORLEVEL% NEQ 0 (

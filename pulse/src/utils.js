@@ -25,7 +25,7 @@ const ENV_PATH = path.join(USER_DIR, '.env');
 
 // Default settings as fallback
 const DEFAULT_SETTINGS = {
-  VERSION: '1.0.0',
+  VERSION: 'Settings Fallback - Contact Support',
   SENTIMENT_BOUNDARIES: {
     EXTREME_FEAR: 15,
     FEAR: 35,
@@ -39,11 +39,10 @@ const DEFAULT_SETTINGS = {
     EXTREME_GREED: 0.04
   },
   MIN_PROFIT_PERCENT: 0.2,
-  TRADE_COOLDOWN_MINUTES: 30,
   TRADE_SIZE_METHOD: "STRATEGIC",
   STRATEGIC_PERCENTAGE: 2.5,
   USER_MONTHLY_COST: 0,
-  DEVELOPER_TIP_PERCENTAGE: 0.029,
+  DEVELOPER_TIP_PERCENTAGE: 0,
   MONITOR_MODE: false
 };
 

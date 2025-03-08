@@ -21,11 +21,26 @@ const DEFAULT_MAX_AUTO_SLIPPAGE_BPS = 500;
  */
 async function fetchFearGreedIndex() {
     try {
-        const response = await axios.get('https://cfgi.io/solana-fear-greed-index/15m');
+        // Get timeframe from settings
+        const { readSettings } = require('./pulseServer');
+        const settings = readSettings();
+        
+        // Use the configured timeframe or default to 15m
+        const timeframe = settings.FGI_TIMEFRAME || "15m";
+        
+        // Validate the timeframe (only allow valid values)
+        const validTimeframes = ["15m", "1h", "4h"];
+        const validatedTimeframe = validTimeframes.includes(timeframe) ? timeframe : "15m";
+        
+        // Construct the URL with the appropriate timeframe
+        const url = `https://cfgi.io/solana-fear-greed-index/${validatedTimeframe}`;
+        
+        const response = await axios.get(url);
         const html = response.data;
         const $ = cheerio.load(html);
         const scriptContent = $('script:contains("series:")').html();
         
+        // Rest of the function remains the same
         if (!scriptContent) {
             throw new Error('Could not find script containing series data');
         }
@@ -45,12 +60,13 @@ async function fetchFearGreedIndex() {
         // Update and log the value
         lastFGIValue = seriesNumber;
         devLog('Current Fear and Greed Index:', seriesNumber);
+        devLog(`Using timeframe: ${validatedTimeframe}`);
         
         return seriesNumber;
     } catch (error) {
         console.error('Error fetching Fear and Greed Index:', error.message);
         
-        // If we had a previous value, return that instead of the default
+        // Rest of error handling remains the same
         if (lastFGIValue !== null) {
             devLog('Using last known FGI value:', lastFGIValue);
             return lastFGIValue;

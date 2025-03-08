@@ -70,13 +70,12 @@ let progressInterval = null;
 const MIN_USD_VALUE = 5; // Minimum USD value to keep in the wallet
 const MAX_TRADE_ATTEMPTS = 10;
 const RETRY_DELAY = 5000; // 5 seconds
-// No need for a fixed emergency delay - we'll use the regular cycle timing
 
 /**
  * Progress bar for visualizing wait time between trading cycles
  */
 const progressBar = new cliProgress.SingleBar({
-    format: 'Progress |{bar}| {percentage}% | {remainingTime}',
+    format: 'Progress |{bar}| {percentage}% | {remainingTime} remaining | {timeframe}',
     barCompleteChar: '\u2588',
     barIncompleteChar: '\u2591',
     hideCursor: true,
@@ -100,9 +99,10 @@ function cleanupProgressBar() {
 /**
  * Starts and manages a progress bar for the given duration
  * @param {number} totalSeconds - Total seconds to track
+ * @param {string} timeframe - Current FGI timeframe
  * @returns {number} - Interval ID for cleanup
  */
-function startProgressBar(totalSeconds) {
+function startProgressBar(totalSeconds, timeframe = '15m') {
     // First cleanup any existing progress bar
     cleanupProgressBar();
     
@@ -112,9 +112,10 @@ function startProgressBar(totalSeconds) {
     }
 
     try {
-        // Start new progress tracking
+        // Start new progress tracking with timeframe info
         progressBar.start(totalSeconds, 0, {
-            remainingTime: formatTime(totalSeconds * 1000)
+            remainingTime: formatTime(totalSeconds * 1000),
+            timeframe: timeframe
         });
 
         let elapsedSeconds = 0;
@@ -130,7 +131,8 @@ function startProgressBar(totalSeconds) {
 
             try {
                 progressBar.update(elapsedSeconds, {
-                    remainingTime: formatTime(remainingSeconds * 1000)
+                    remainingTime: formatTime(remainingSeconds * 1000),
+                    timeframe: timeframe
                 });
             } catch (error) {
                 console.error('Error updating progress bar:', error);
@@ -444,12 +446,17 @@ function savePositionState(tradingData) {
  */
 async function scheduleNextExecution() {
     try {
+        const settings = readSettings();
+        const timeframe = settings.FGI_TIMEFRAME || "15m";
+        
         const waitTime = getWaitTime();
         const nextExecutionTime = new Date(Date.now() + waitTime);
-        console.log(`\nNext trading update at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
+        console.log(`\nNext trading update (${timeframe}) at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
 
         const totalSeconds = Math.ceil(waitTime / 1000);
-        progressInterval = startProgressBar(totalSeconds);
+        
+        // Pass timeframe to progress bar
+        progressInterval = startProgressBar(totalSeconds, timeframe);
 
         globalTimeoutId = setTimeout(async () => {
             if (progressInterval) {
@@ -468,7 +475,7 @@ async function scheduleNextExecution() {
         console.error('Error scheduling next execution:', scheduleError);
         cleanupProgressBar();
         
-        // Align with the expected 15-minute cycles rather than using a fixed delay
+        // Align with the expected cycles rather than using a fixed delay
         const waitTime = getWaitTime();
         console.log(`Error occurred. Waiting until next expected cycle in ${formatTime(waitTime)}`);
         setTimeout(async () => {
@@ -494,6 +501,10 @@ async function main() {
         // Increment cycle counter
         position.incrementCycle();
 
+        // Get the current FGI timeframe
+        const settings = readSettings();
+        const timeframe = settings.FGI_TIMEFRAME || "15m";
+
         // Fetch current market data
         const fearGreedIndex = await fetchFearGreedIndex();
         const sentiment = getSentiment(fearGreedIndex);
@@ -504,8 +515,8 @@ async function main() {
         await logTradingData(timestamp, currentPrice, fearGreedIndex);
         devLog(`Data Logged: ${timestamp}, ${currentPrice}, ${fearGreedIndex}`);
 
-        // Display current cycle info
-        console.log(`\n--- Trading Cycle: ${timestamp} ---`);
+        // Display current cycle info with timeframe
+        console.log(`\n--- Trading Cycle (${timeframe}): ${timestamp} ---`);
         console.log(`Fear & Greed Index: ${fearGreedIndex} - Sentiment: ${sentiment}`);
         console.log(`Current SOL Price: $${currentPrice.toFixed(2)}`);
 

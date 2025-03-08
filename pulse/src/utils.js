@@ -26,6 +26,7 @@ const ENV_PATH = path.join(USER_DIR, '.env');
 // Default settings as fallback
 const DEFAULT_SETTINGS = {
   VERSION: 'Settings Fallback - Contact Support',
+  FGI_TIMEFRAME: "15m",
   SENTIMENT_BOUNDARIES: {
     EXTREME_FEAR: 15,
     FEAR: 35,
@@ -150,43 +151,92 @@ function getTimestamp() {
 }
 
 /**
- * Formats milliseconds into minutes:seconds format
+ * Convert FGI timeframe to milliseconds for scheduling
+ * @param {string} timeframe - Timeframe string (15m, 1h, 4h)
+ * @returns {number} - Interval in milliseconds
+ */
+function timeframeToMilliseconds(timeframe) {
+  switch(timeframe) {
+      case "1h":
+          return 60 * 60 * 1000; // 1 hour
+      case "4h":
+          return 4 * 60 * 60 * 1000; // 4 hours
+      case "15m":
+      default:
+          return 15 * 60 * 1000; // 15 minutes
+  }
+}
+
+/**
+ * Formats milliseconds into readable time format
  * @param {number} milliseconds - Time in milliseconds
  * @returns {string} Formatted time string
  */
 function formatTime(milliseconds) {
   if (typeof milliseconds !== 'number' || milliseconds < 0) {
-    return '00:00';
+      return '00:00';
   }
   
   const totalSeconds = Math.ceil(milliseconds / 1000);
-  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  
+  // Include hours if needed
+  if (hours > 0) {
+      return `${hours}:${minutes}:${seconds}`;
+  }
+  
   return `${minutes}:${seconds}`;
 }
 
 /**
- * Gets the timestamp for the next 15-minute interval
+ * Gets the timestamp for the next interval based on configured timeframe
  * @returns {number} Next interval timestamp
  */
 function getNextIntervalTime() {
   const now = new Date();
-  const minutes = now.getMinutes();
+  
+  // Get timeframe from settings
+  const settings = readSettings();
+  const timeframe = settings.FGI_TIMEFRAME || "15m";
+  
+  // Convert timeframe to milliseconds
+  const INTERVAL = timeframeToMilliseconds(timeframe);
+  const DELAY_AFTER_INTERVAL = 45000; // 45 seconds delay remains the same
+  
+  let minutesToNext, hourToNext;
+  
+  switch(timeframe) {
+      case "1h":
+          // Align to the next full hour
+          minutesToNext = 60 - now.getMinutes();
+          break;
+      case "4h":
+          // Align to the next 4-hour block (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+          const currentHour = now.getHours();
+          const nextBlock = Math.ceil((currentHour + 1) / 4) * 4;
+          hourToNext = (nextBlock - currentHour);
+          minutesToNext = (hourToNext * 60) - now.getMinutes();
+          break;
+      case "15m":
+      default:
+          // Original 15-minute interval logic
+          minutesToNext = 15 - (now.getMinutes() % 15);
+          break;
+  }
+  
   const seconds = now.getSeconds();
   const milliseconds = now.getMilliseconds();
-
-  const INTERVAL = 900000; // 15 minutes
-  const DELAY_AFTER_INTERVAL = 45000; // 45 seconds
-
-  // Calculate time to next 15 minute interval plus delay
-  const minutesToNext = 15 - (minutes % 15);
+  
+  // Calculate total milliseconds to next interval
   let totalMs = (minutesToNext * 60 * 1000) - (seconds * 1000) - milliseconds + DELAY_AFTER_INTERVAL;
-
+  
   // If we're already close to the next interval, add another interval
   if (totalMs < DELAY_AFTER_INTERVAL) {
-    totalMs += INTERVAL;
+      totalMs += INTERVAL;
   }
-
+  
   return now.getTime() + totalMs;
 }
 
@@ -611,6 +661,7 @@ async function loadEnvironment() {
 module.exports = {
   // Time management
   getTimestamp,
+  timeframeToMilliseconds,
   formatTime,
   getNextIntervalTime,
   getWaitTime,

@@ -30,6 +30,7 @@ const OrderBook = require('./orderBook');
 // Settings configuration
 const SETTINGS_ORDER = [
   "VERSION",
+  "FGI_TIMEFRAME",
   "SENTIMENT_BOUNDARIES",
   "SENTIMENT_MULTIPLIERS",
   "MIN_PROFIT_PERCENT",
@@ -448,6 +449,7 @@ PORT=3000
     const currentVersion = getVersion();
     const DEFAULT_SETTINGS = orderSettings({
       VERSION: currentVersion,
+      FGI_TIMEFRAME: "15m",
       SENTIMENT_BOUNDARIES: {
         EXTREME_FEAR: 15,
         FEAR: 35,

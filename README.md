@@ -173,6 +173,7 @@ Configure trading parameters in `settings.json` or via the web interface:
 ### Trading Parameters
 ```json
 {
+    "FGI_TIMEFRAME": 15m,               // Trading timeframe to check FGI reading. (15m, 1h or 4h)
     "MIN_PROFIT_PERCENT": 0.2,          // Minimum profit percentage required to close a trade
     "TRADE_COOLDOWN_MINUTES": 30,       // Minimum time between trades
     "TRADE_SIZE_METHOD": "STRATEGIC",   // STRATEGIC or VARIABLE
@@ -185,7 +186,7 @@ Configure trading parameters in `settings.json` or via the web interface:
 ```json
 {
     "USER_MONTHLY_COST": 0,             // Monthly operational cost in USD (for APY calculations)
-    "DEVELOPER_TIP_PERCENTAGE": 0.029,  // Recommended Tip to Support SolSurfer Development and earn Bubbles
+    "DEVELOPER_TIP_PERCENTAGE": 0,      // Recommended Tip to Support SolSurfer Development and earn Bubbles
     "MONITOR_MODE": false               // Enable/disable trading (true = monitor only)
 }
 ```

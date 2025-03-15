@@ -200,6 +200,12 @@ button:hover {
     position: relative;
 }
 
+#tokenPairTitle {
+    color: var(--primary);
+    margin-top: -15px;
+    margin-bottom: 10px;
+}
+
 .tooltip-trigger {
     position: absolute;
     top: 8px;
@@ -468,6 +474,13 @@ button:hover {
     color: #888;
     margin-top: -10px;
     margin-bottom: 10px;
+}
+
+#versionNumber {
+    font-size: 0.9em;
+    color: var(--secondary);
+    margin-top: -10px;
+    margin-bottom: 15px;
 }
 
 .gear-button {

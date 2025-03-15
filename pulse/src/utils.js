@@ -52,8 +52,8 @@ let DEVELOPER_MODE = false;
 let tradingPeriodState = {
   startTime: null,
   baseTradeSizes: {
-    SOL: null,
-    USDC: null
+    BASE: null,
+    QUOTE: null
   }
 };
 
@@ -67,6 +67,248 @@ const csvWriter = csv({
   ],
   append: true
 });
+
+// ===========================
+// Console Styling Utilities
+// ===========================
+
+// Colour codes
+const colours = {
+  reset: "\x1b[0m",
+  bright: "\x1b[1m",
+  dim: "\x1b[2m",
+  underscore: "\x1b[4m",
+  blink: "\x1b[5m",
+  reverse: "\x1b[7m",
+  hidden: "\x1b[8m",
+  
+  // Foreground colours
+  black: "\x1b[30m",
+  red: "\x1b[31m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  blue: "\x1b[34m",
+  magenta: "\x1b[35m",
+  cyan: "\x1b[36m",
+  white: "\x1b[37m",
+  
+  // Background colours
+  bgBlack: "\x1b[40m",
+  bgRed: "\x1b[41m",
+  bgGreen: "\x1b[42m",
+  bgYellow: "\x1b[43m",
+  bgBlue: "\x1b[44m",
+  bgMagenta: "\x1b[45m",
+  bgCyan: "\x1b[46m",
+  bgWhite: "\x1b[47m"
+};
+
+// Message type styles
+const styles = {
+  heading: `${colours.bright}${colours.cyan}`,
+  subheading: `${colours.bright}${colours.blue}`,
+  success: `${colours.green}`,
+  warning: `${colours.yellow}`,
+  error: `${colours.red}`,
+  info: `${colours.cyan}`,
+  important: `${colours.bright}${colours.magenta}`,
+  balance: `${colours.bright}${colours.white}`,
+  price: `${colours.yellow}`,
+  positive: `${colours.green}`,
+  negative: `${colours.red}`,
+  neutral: `${colours.blue}`,
+  time: `${colours.dim}${colours.white}`,
+  table: `${colours.bright}${colours.white}`,
+  detail: `${colours.dim}${colours.white}`,
+  sentiment: {
+    "EXTREME_FEAR": `${colours.bright}${colours.red}`,
+    "FEAR": `${colours.red}`,
+    "NEUTRAL": `${colours.blue}`,
+    "GREED": `${colours.green}`,
+    "EXTREME_GREED": `${colours.bright}${colours.green}`
+  }
+};
+
+// Category icons
+const icons = {
+  time: "🕒",
+  price: "💲",
+  sentiment: "🧠",
+  balance: "💰",
+  trade: "🔄",
+  buy: "📈",
+  sell: "📉",
+  success: "✅",
+  error: "❌",
+  warning: "⚠️",
+  info: "ℹ️",
+  profit: "💸",
+  loss: "📉",
+  network: "🌐",
+  wallet: "👛",
+  settings: "⚙️",
+  chart: "📊",
+  stats: "📊",
+  cycle: "🔄",
+  close: "🔒",
+  open: "🚀",
+  wait: "⏳",
+  running: "⚡",
+  menu: "🔍"
+};
+
+/**
+ * Formats a heading with appropriate styling
+ * @param {string} text - Heading text
+ * @returns {string} - Formatted text
+ */
+function formatHeading(text) {
+  return `\n${styles.heading}${text}${colours.reset}`;
+}
+
+/**
+ * Formats a subheading with appropriate styling
+ * @param {string} text - Subheading text
+ * @returns {string} - Formatted text
+ */
+function formatSubheading(text) {
+  return `${styles.subheading}${text}${colours.reset}`;
+}
+
+/**
+ * Formats a success message with appropriate styling
+ * @param {string} text - Success text
+ * @param {boolean} icon - Whether to include an icon
+ * @returns {string} - Formatted text
+ */
+function formatSuccess(text, icon = true) {
+  return `${styles.success}${icon ? `${icons.success} ` : ''}${text}${colours.reset}`;
+}
+
+/**
+ * Formats an error message with appropriate styling
+ * @param {string} text - Error text
+ * @param {boolean} icon - Whether to include an icon
+ * @returns {string} - Formatted text
+ */
+function formatError(text, icon = true) {
+  return `${styles.error}${icon ? `${icons.error} ` : ''}${text}${colours.reset}`;
+}
+
+/**
+ * Formats a warning message with appropriate styling
+ * @param {string} text - Warning text
+ * @param {boolean} icon - Whether to include an icon
+ * @returns {string} - Formatted text
+ */
+function formatWarning(text, icon = true) {
+  return `${styles.warning}${icon ? `${icons.warning} ` : ''}${text}${colours.reset}`;
+}
+
+/**
+ * Formats an info message with appropriate styling
+ * @param {string} text - Info text
+ * @param {boolean} icon - Whether to include an icon
+ * @returns {string} - Formatted text
+ */
+function formatInfo(text, icon = true) {
+  return `${styles.info}${icon ? `${icons.info} ` : ''}${text}${colours.reset}`;
+}
+
+/**
+ * Formats a price with appropriate styling
+ * @param {number} price - Price value
+ * @param {string} currency - Currency symbol
+ * @returns {string} - Formatted text
+ */
+function formatPrice(price, currency = '$') {
+  return `${styles.price}${currency}${typeof price === 'number' ? price.toFixed(2) : price}${colours.reset}`;
+}
+
+/**
+ * Formats a sentiment with appropriate styling
+ * @param {string} sentiment - Sentiment text
+ * @returns {string} - Formatted text
+ */
+function formatSentiment(sentiment) {
+  return `${styles.sentiment[sentiment] || styles.neutral}${sentiment}${colours.reset}`;
+}
+
+/**
+ * Formats a number as a percentage with colour based on value
+ * @param {number} value - Percentage value
+ * @returns {string} - Formatted text
+ */
+function formatPercentage(value) {
+  const formattedValue = typeof value === 'number' ? value.toFixed(2) : value;
+  const style = value > 0 ? styles.positive : (value < 0 ? styles.negative : styles.neutral);
+  const prefix = value > 0 ? '+' : '';
+  return `${style}${prefix}${formattedValue}%${colours.reset}`;
+}
+
+/**
+ * Creates a horizontal line for separating sections
+ * @param {number} length - Length of line
+ * @returns {string} - Formatted line
+ */
+function horizontalLine(length = 50) {
+  return `${styles.detail}${'─'.repeat(length)}${colours.reset}`;
+}
+
+/**
+ * Creates a right-aligned padded text for table-like formatting
+ * @param {string} text - Text to pad
+ * @param {number} length - Desired length
+ * @returns {string} - Padded text
+ */
+function padRight(text, length) {
+  return String(text).padEnd(length);
+}
+
+/**
+ * Creates a left-aligned padded text for table-like formatting
+ * @param {string} text - Text to pad
+ * @param {number} length - Desired length
+ * @returns {string} - Padded text
+ */
+function padLeft(text, length) {
+  return String(text).padStart(length);
+}
+
+/**
+ * Formats a timestamp with appropriate styling
+ * @param {string} timestamp - Timestamp text
+ * @param {boolean} icon - Whether to include an icon
+ * @returns {string} - Formatted text
+ */
+function formatTimestamp(timestamp, icon = true) {
+  return `${styles.time}${icon ? `${icons.time} ` : ''}${timestamp}${colours.reset}`;
+}
+
+/**
+ * Formats wallet balance with appropriate styling
+ * @param {number} amount - Balance amount
+ * @param {string} token - Token symbol
+ * @returns {string} - Formatted text
+ */
+function formatBalance(amount, token) {
+  const formattedAmount = typeof amount === 'number' ? amount.toFixed(token === 'USDC' ? 2 : 6) : amount;
+  return `${styles.balance}${formattedAmount} ${token}${colours.reset}`;
+}
+
+/**
+ * Formats token change with colour based on direction
+ * @param {number} amount - Change amount
+ * @param {string} token - Token symbol
+ * @param {boolean} showPlus - Whether to show + for positive values
+ * @returns {string} - Formatted text
+ */
+function formatTokenChange(amount, token, showPlus = true) {
+  const style = amount > 0 ? styles.positive : (amount < 0 ? styles.negative : styles.neutral);
+  const prefix = amount > 0 && showPlus ? '+' : '';
+  const formattedAmount = typeof amount === 'number' ? amount.toFixed(token === 'USDC' ? 2 : 6) : amount;
+  return `${style}${prefix}${formattedAmount} ${token}${colours.reset}`;
+}
 
 // ===========================
 // Logging Functions
@@ -102,7 +344,7 @@ async function logTradingData(timestamp, price, indexValue) {
   try {
     // Validate inputs
     if (!timestamp || typeof price !== 'number' || typeof indexValue !== 'number') {
-      console.error('Invalid trading data:', { timestamp, price, indexValue });
+      console.error(formatError('Invalid trading data:', { timestamp, price, indexValue }));
       return false;
     }
 
@@ -122,9 +364,111 @@ async function logTradingData(timestamp, price, indexValue) {
     devLog('Trading data logged successfully');
     return true;
   } catch (error) {
-    console.error('Error logging trading data:', error);
+    console.error(formatError(`Error logging trading data: ${error.message}`));
     return false;
   }
+}
+
+/**
+ * Gets token configuration from settings
+ * @returns {Object} Token configuration with BASE_TOKEN and QUOTE_TOKEN
+ */
+function getTokenConfig() {
+  const settings = readSettings();
+  
+  // Default to SOL/USDC if not configured
+  const defaultConfig = {
+    BASE_TOKEN: {
+      NAME: "SOL",
+      ADDRESS: "So11111111111111111111111111111111111111112",
+      DECIMALS: 9,
+      FULL_NAME: "solana"
+    },
+    QUOTE_TOKEN: {
+      NAME: "USDC",
+      ADDRESS: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      DECIMALS: 6
+    }
+  };
+  
+  if (!settings.TRADING_PAIR || 
+      !settings.TRADING_PAIR.BASE_TOKEN || 
+      !settings.TRADING_PAIR.QUOTE_TOKEN) {
+    devLog('No token configuration found, using default SOL/USDC');
+    return defaultConfig;
+  }
+  
+  return settings.TRADING_PAIR;
+}
+
+/**
+ * Gets the base token configuration
+ * @returns {Object} Base token configuration
+ */
+function getBaseToken() {
+  return getTokenConfig().BASE_TOKEN;
+}
+
+/**
+ * Gets the quote token configuration
+ * @returns {Object} Quote token configuration
+ */
+function getQuoteToken() {
+  return getTokenConfig().QUOTE_TOKEN;
+}
+
+/**
+ * Converts token amount to smallest units (e.g., lamports) based on token decimals
+ * @param {number} amount - Amount in token units
+ * @param {Object} token - Token configuration object
+ * @returns {number} Amount in smallest units
+ */
+function toTokenBaseUnits(amount, token) {
+  if (typeof amount !== 'number' || isNaN(amount)) {
+    throw new Error(`Invalid amount: ${amount}`);
+  }
+  
+  if (!token || typeof token.DECIMALS !== 'number') {
+    throw new Error('Invalid token configuration');
+  }
+  
+  return Math.floor(amount * Math.pow(10, token.DECIMALS));
+}
+
+/**
+ * Converts smallest units to token amount based on token decimals
+ * @param {number} baseUnits - Amount in smallest denomination
+ * @param {Object} token - Token configuration object
+ * @returns {number} Amount in token units
+ */
+function fromTokenBaseUnits(baseUnits, token) {
+  if (typeof baseUnits !== 'number' || isNaN(baseUnits)) {
+    throw new Error(`Invalid base units: ${baseUnits}`);
+  }
+  
+  if (!token || typeof token.DECIMALS !== 'number') {
+    throw new Error('Invalid token configuration');
+  }
+  
+  return baseUnits / Math.pow(10, token.DECIMALS);
+}
+
+/**
+ * Formats a token amount with proper decimal precision
+ * @param {number} amount - Token amount
+ * @param {Object} token - Token configuration
+ * @returns {string} Formatted amount
+ */
+function formatTokenAmount(amount, token) {
+  if (typeof amount !== 'number' || isNaN(amount)) {
+    return '0';
+  }
+  
+  if (!token || typeof token.DECIMALS !== 'number') {
+    return amount.toFixed(6); // Default precision
+  }
+  
+  return amount.toFixed(token.DECIMALS);
 }
 
 // ===========================
@@ -276,7 +620,7 @@ function getLocalIpAddress() {
     }
     return 'localhost';
   } catch (error) {
-    console.error('Error getting local IP address:', error);
+    console.error(formatError(`Error getting local IP address: ${error.message}`));
     return 'localhost';
   }
 }
@@ -305,10 +649,10 @@ function getVersion() {
       return packageData.version;
     }
 
-    console.error('Could not find package.json in', rootDir, 'or', altRootDir);
+    console.error(formatError('Could not find package.json'));
     return 'unknown';
   } catch (error) {
-    console.error('Error reading package.json:', error);
+    console.error(formatError(`Error reading package.json: ${error.message}`));
     return 'unknown';
   }
 }
@@ -329,11 +673,11 @@ function ensureSettingsFile() {
     
     if (!fs.existsSync(SETTINGS_PATH)) {
       fs.writeFileSync(SETTINGS_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-      console.log('Created default settings file.');
+      console.log(formatSuccess('Created default settings file.'));
     }
     return true;
   } catch (error) {
-    console.error('Error creating settings file:', error);
+    console.error(formatError(`Error creating settings file: ${error.message}`));
     return false;
   }
 }
@@ -352,7 +696,7 @@ function readSettings() {
     const settingsData = fs.readFileSync(SETTINGS_PATH, 'utf8');
     return JSON.parse(settingsData);
   } catch (error) {
-    console.error('Error reading settings.json:', error);
+    console.error(formatError(`Error reading settings.json: ${error.message}`));
     return DEFAULT_SETTINGS;
   }
 }
@@ -369,10 +713,10 @@ function writeSettings(settings) {
     }
     
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
-    console.log('Settings updated successfully.');
+    console.log(formatSuccess('Settings updated successfully.'));
     return true;
   } catch (error) {
-    console.error('Error writing settings.json:', error);
+    console.error(formatError(`Error writing settings.json: ${error.message}`));
     return false;
   }
 }
@@ -422,41 +766,45 @@ function checkTradingPeriod() {
 
 /**
  * Sets a new trading period with calculated base sizes
- * @param {number} solBalance - Current SOL balance
- * @param {number} usdcBalance - Current USDC balance
+ * @param {number} baseBalance - Current base balance
+ * @param {number} quoteBalance - Current quote balance
  * @param {number} strategicPercentage - Strategic percentage for sizing
  * @returns {Object} Base trade sizes
  */
-function setNewTradingPeriod(solBalance, usdcBalance, strategicPercentage) {
+function setNewTradingPeriod(baseBalance, quoteBalance, strategicPercentage) {
   // Validate inputs
-  if (typeof solBalance !== 'number' || isNaN(solBalance) || solBalance < 0) {
-    console.error('Invalid SOL balance:', solBalance);
-    solBalance = 0;
+  if (typeof baseBalance !== 'number' || isNaN(baseBalance) || baseBalance < 0) {
+    console.error(formatError(`Invalid base token balance: ${baseBalance}`));
+    baseBalance = 0;
   }
   
-  if (typeof usdcBalance !== 'number' || isNaN(usdcBalance) || usdcBalance < 0) {
-    console.error('Invalid USDC balance:', usdcBalance);
-    usdcBalance = 0;
+  if (typeof quoteBalance !== 'number' || isNaN(quoteBalance) || quoteBalance < 0) {
+    console.error(formatError(`Invalid quote balance: ${quoteBalance}`));
+    quoteBalance = 0;
   }
   
   if (typeof strategicPercentage !== 'number' || isNaN(strategicPercentage) || strategicPercentage <= 0) {
-    console.error('Invalid strategic percentage:', strategicPercentage);
+    console.error(formatError(`Invalid strategic percentage: ${strategicPercentage}`));
     strategicPercentage = 2.5; // Default value
   }
 
-  const baseSOL = solBalance * (strategicPercentage / 100);
-  const baseUSDC = usdcBalance * (strategicPercentage / 100);
-
+  const baseBase = baseBalance * (strategicPercentage / 100);
+  const baseQUOTE = quoteBalance * (strategicPercentage / 100);
+  
   tradingPeriodState = {
     startTime: Date.now(),
     baseTradeSizes: {
-      SOL: baseSOL,
-      USDC: baseUSDC
+      BASE: baseBase,
+      QUOTE: baseQUOTE
     }
   };
   
-  console.log(`New trading period started at ${new Date(tradingPeriodState.startTime).toISOString()}`);
-  console.log(`Base trade sizes set to: ${baseSOL.toFixed(6)} SOL / ${baseUSDC.toFixed(2)} USDC`);
+  const baseToken = getBaseToken();
+  const quoteToken = getQuoteToken();
+  
+  console.log(formatInfo(`${icons.time} New trading period started at ${new Date(tradingPeriodState.startTime).toISOString()}`));
+  console.log(formatInfo(`${icons.trade} Base trade sizes set to: ${formatBalance(baseBase, baseToken.NAME)} / ${formatBalance(baseQUOTE, quoteToken.NAME)}`));
+  
   return tradingPeriodState.baseTradeSizes;
 }
 
@@ -492,11 +840,11 @@ function resetTradingPeriod() {
   tradingPeriodState = {
     startTime: null,
     baseTradeSizes: {
-      SOL: null,
-      USDC: null
+      BASE: null,
+      QUOTE: null
     }
   };
-  console.log('Trading period has been reset');
+  console.log(formatInfo(`${icons.settings} Trading period has been reset`));
 }
 
 // ===========================
@@ -509,7 +857,7 @@ function resetTradingPeriod() {
 function setupEnvFile() {
   try {
     if (!fs.existsSync(ENV_PATH)) {
-      console.log('.env file not found. Creating a new one...');
+      console.log(formatInfo(`${icons.settings} .env file not found. Creating a new one...`));
 
       const envContent = `PRIMARY_RPC=
 SECONDARY_RPC=        # Optional: Recommended for improved reliability
@@ -524,12 +872,12 @@ PORT=3000
       }
 
       fs.writeFileSync(ENV_PATH, envContent);
-      console.log('.env file created successfully. Please fill in your details.');
+      console.log(formatSuccess(`${icons.success} .env file created successfully. Please fill in your details.`));
       return true;
     }
     return true;
   } catch (error) {
-    console.error('Error setting up .env file:', error);
+    console.error(formatError(`Error setting up .env file: ${error.message}`));
     return false;
   }
 }
@@ -555,7 +903,7 @@ async function checkConnectionHealth(connection, publicKey) {
     devLog(`RPC response time: ${responseTime}ms`);
     return responseTime < 5000;
   } catch (error) {
-    console.error('Connection health check failed:', error.message);
+    console.error(formatError(`Connection health check failed: ${error.message}`));
     return false;
   }
 }
@@ -568,27 +916,27 @@ async function checkConnectionHealth(connection, publicKey) {
 async function attemptRPCFailover(wallet) {
   // Check if secondary RPC exists
   if (!process.env.SECONDARY_RPC) {
-    console.log("No secondary RPC configured - cannot attempt failover");
+    console.log(formatWarning(`${icons.warning} No secondary RPC configured - cannot attempt failover`));
     return false;
   }
 
   try {
-    console.log("Attempting RPC failover...");
+    console.log(formatInfo(`${icons.network} Attempting RPC failover...`));
     const newConnection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
     
     // Test new connection
     const isHealthy = await checkConnectionHealth(newConnection, wallet.publicKey);
     
     if (isHealthy) {
-      console.log("Successfully failed over to secondary RPC");
+      console.log(formatSuccess(`${icons.success} Successfully failed over to secondary RPC`));
       wallet.connection = newConnection;
       return true;
     }
     
-    console.log("Secondary RPC is not healthy");
+    console.log(formatWarning(`${icons.warning} Secondary RPC is not healthy`));
     return false;
   } catch (error) {
-    console.error("Failover attempt failed:", error);
+    console.error(formatError(`Failover attempt failed: ${error.message}`));
     return false;
   }
 }
@@ -603,13 +951,13 @@ async function loadEnvironment() {
   dotenv.config({ path: ENV_PATH });
 
   if (!process.env.PRIMARY_RPC) {
-    console.error("Missing required PRIMARY_RPC. Please ensure PRIMARY_RPC is set in your .env file.");
+    console.error(formatError(`${icons.error} Missing required PRIMARY_RPC. Please ensure PRIMARY_RPC is set in your .env file.`));
     process.exit(1);
   }
 
   try {
     if (!process.env.PRIVATE_KEY) {
-      console.error("Missing required PRIVATE_KEY. Please ensure PRIVATE_KEY is set in your .env file.");
+      console.error(formatError(`${icons.error} Missing required PRIVATE_KEY. Please ensure PRIVATE_KEY is set in your .env file.`));
       process.exit(1);
     }
     
@@ -623,20 +971,20 @@ async function loadEnvironment() {
     // Test connection
     try {
       await connection.getBalance(keypair.publicKey);
-      console.log("Connected to primary RPC successfully");
+      console.log(formatSuccess(`${icons.network} Connected to primary RPC successfully`));
     } catch (error) {
-      console.error("Primary RPC connection failed:", error.message);
+      console.error(formatError(`${icons.error} Primary RPC connection failed: ${error.message}`));
       
       // Only try secondary if it exists
       if (process.env.SECONDARY_RPC) {
-        console.log("Attempting to connect to secondary RPC...");
+        console.log(formatInfo(`${icons.network} Attempting to connect to secondary RPC...`));
         try {
           connection = new Connection(process.env.SECONDARY_RPC, 'confirmed');
           await connection.getBalance(keypair.publicKey);
-          console.log("Connected to secondary RPC successfully");
+          console.log(formatSuccess(`${icons.network} Connected to secondary RPC successfully`));
           connectionSource = 'secondary';
         } catch (secondaryError) {
-          console.error("Secondary RPC connection also failed.");
+          console.error(formatError(`${icons.error} Secondary RPC connection also failed.`));
           throw new Error("Unable to establish connection to any RPC endpoint");
         }
       } else {
@@ -649,7 +997,7 @@ async function loadEnvironment() {
 
     return { keypair, connection, wallet, connectionSource };
   } catch (error) {
-    console.error("Error verifying keypair or establishing connection:", error.message);
+    console.error(formatError(`${icons.error} Error verifying keypair or establishing connection: ${error.message}`));
     process.exit(1);
   }
 }
@@ -659,6 +1007,34 @@ async function loadEnvironment() {
 // ===========================
 
 module.exports = {
+  // Console styling
+  colours,
+  styles,
+  icons,
+  formatHeading,
+  formatSubheading,
+  formatSuccess,
+  formatError,
+  formatWarning,
+  formatInfo,
+  formatPrice,
+  formatSentiment,
+  formatPercentage,
+  horizontalLine,
+  padRight,
+  padLeft,
+  formatTimestamp,
+  formatBalance,
+  formatTokenChange,
+  
+  // Token management
+  getTokenConfig,
+  getBaseToken,
+  getQuoteToken,
+  toTokenBaseUnits,
+  fromTokenBaseUnits,
+  formatTokenAmount,
+
   // Time management
   getTimestamp,
   timeframeToMilliseconds,

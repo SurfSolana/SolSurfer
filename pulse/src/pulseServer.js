@@ -18,7 +18,31 @@ const cors = require('cors');
 const session = require('express-session');
 const axios = require('axios');
 const readline = require('readline');
-const { getVersion, devLog } = require('./utils');
+const { 
+  getVersion, 
+  devLog, 
+  getBaseToken, 
+  getQuoteToken,
+  // Import styling utilities
+  formatHeading,
+  formatSubheading,
+  formatSuccess,
+  formatError,
+  formatWarning,
+  formatInfo,
+  formatPrice,
+  formatSentiment,
+  formatPercentage,
+  horizontalLine,
+  padRight,
+  padLeft,
+  formatTimestamp,
+  formatBalance,
+  formatTokenChange,
+  icons,
+  styles,
+  colours
+} = require('./utils');
 const { getWallet, getConnection } = require('./globalState');
 const { PublicKey } = require('@solana/web3.js');
 const OrderBook = require('./orderBook');
@@ -30,6 +54,7 @@ const OrderBook = require('./orderBook');
 // Settings configuration
 const SETTINGS_ORDER = [
   "VERSION",
+  "TRADING_PAIR",
   "FGI_TIMEFRAME",
   "SENTIMENT_BOUNDARIES",
   "SENTIMENT_MULTIPLIERS",
@@ -43,13 +68,17 @@ const SETTINGS_ORDER = [
 
 const NESTED_ORDERS = {
   "SENTIMENT_BOUNDARIES": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"],
-  "SENTIMENT_MULTIPLIERS": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"]
+  "SENTIMENT_MULTIPLIERS": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"],
+  "TRADING_PAIR": ["BASE_TOKEN", "QUOTE_TOKEN"]
 };
 
 // File paths
 const USER_DIR = path.join(__dirname, '..', '..', 'user');
+const ORDERBOOKS_DIR = path.join(USER_DIR, 'orderbooks');
+const SAVESTATES_DIR = path.join(USER_DIR, 'savestates');
 const SETTINGS_PATH = path.join(USER_DIR, 'settings.json');
-const STATE_FILE_PATH = path.join(USER_DIR, 'saveState.json');
+const LEGACY_STATE_FILE_PATH = path.join(USER_DIR, 'saveState.json');
+const LEGACY_ORDERBOOK_PATH = path.join(USER_DIR, 'orderBookStorage.json');
 const ENV_PATH = path.join(USER_DIR, '.env');
 
 // Trading data storage
@@ -63,6 +92,46 @@ const recentTrades = [];
 const paramUpdateEmitter = new EventEmitter();
 // Set higher limit to prevent "MaxListenersExceededWarning"
 paramUpdateEmitter.setMaxListeners(20);
+
+// ===========================
+// Directory Management
+// ===========================
+
+/**
+ * Ensures the required directories exist
+ */
+function ensureDirectories() {
+  const dirs = [USER_DIR, ORDERBOOKS_DIR, SAVESTATES_DIR];
+  dirs.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      devLog(formatInfo(`${icons.settings} Created directory: ${dir}`));
+    }
+  });
+}
+
+/**
+ * Gets the path to the save state file based on current token pair
+ * @returns {string} Path to save state file
+ */
+function getSaveStatePath() {
+  try {
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    const baseTokenLower = baseToken.NAME.toLowerCase();
+    const quoteTokenLower = quoteToken.NAME.toLowerCase();
+    
+    // Get current timeframe from settings
+    const settings = readSettings();
+    const timeframe = settings.FGI_TIMEFRAME || "15m";
+    
+    return path.join(SAVESTATES_DIR, `${baseTokenLower}_${quoteTokenLower}_${timeframe}_saveState.json`);
+  } catch (error) {
+    console.error(formatError(`${icons.error} Error getting save state path: ${error.message}`));
+    // Fallback to legacy path if token information can't be retrieved
+    return LEGACY_STATE_FILE_PATH;
+  }
+}
 
 // ===========================
 // Server Setup
@@ -80,10 +149,10 @@ if (fs.existsSync('/path/to/privkey.pem') && fs.existsSync('/path/to/cert.pem') 
 
   const credentials = { key: privateKey, cert: certificate, ca: ca };
   server = https.createServer(credentials, app);
-  devLog('HTTPS server created');
+  devLog(formatSuccess(`${icons.network} HTTPS server created`));
 } else {
   server = http.createServer(app);
-  devLog('HTTP server created. Consider setting up HTTPS for production use.');
+  devLog(formatWarning(`${icons.warning} HTTP server created. Consider setting up HTTPS for production use.`));
 }
 
 // Socket.io setup
@@ -150,7 +219,7 @@ function readSettings() {
   } catch (error) {
     // Only log if it's not a "file not found" error
     if (error.code !== 'ENOENT') {
-      console.error('Error reading settings.json:', error);
+      console.error(formatError(`${icons.error} Error reading settings.json: ${error.message}`));
     }
     return null;
   }
@@ -180,17 +249,15 @@ function getMonitorMode() {
 function writeSettings(settings) {
   try {
     // Ensure directory exists
-    if (!fs.existsSync(USER_DIR)) {
-      fs.mkdirSync(USER_DIR, { recursive: true });
-    }
+    ensureDirectories();
     
     // Order the settings before writing
     const orderedSettings = orderSettings(settings);
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(orderedSettings, null, 2));
-    devLog('Settings updated successfully.');
+    devLog(formatSuccess(`${icons.success} Settings updated successfully.`));
     return true;
   } catch (error) {
-    console.error('Error writing settings.json:', error);
+    console.error(formatError(`${icons.error} Error writing settings.json: ${error.message}`));
     return false;
   }
 }
@@ -250,7 +317,7 @@ function orderSettings(settings) {
 function updateSettings(newSettings) {
   const currentSettings = readSettings();
   if (!currentSettings) {
-    console.error('Cannot update settings: current settings not found');
+    console.error(formatError(`${icons.error} Cannot update settings: current settings not found`));
     return newSettings;
   }
   
@@ -344,10 +411,12 @@ function checkMissingSettings(current, defaults) {
  */
 function handleVersionUpgrade(settings, missingSettings, defaultSettings, currentVersion, settingsPath) {
   return new Promise((resolve) => {
-    console.log(`\nSettings file was created with v${settings.VERSION || 'unknown'} and current version is v${currentVersion}`);
-    console.log(`\n(Settings.json file path: ${settingsPath})`);
+    console.log(formatHeading("\n=== SETTINGS VERSION UPGRADE ==="));
+    console.log(formatInfo(`${icons.info} Settings file was created with v${settings.VERSION || 'unknown'} and current version is v${currentVersion}`));
+    console.log(formatInfo(`${icons.settings} Settings.json file path: ${settingsPath}`));
+    
     if (Object.keys(missingSettings).length > 0) {
-      console.log('\nThe following settings are missing in your configuration:');
+      console.log(formatWarning(`${icons.warning} The following settings are missing in your configuration:`));
       
       // Format and display missing settings names only
       const missingKeys = Object.keys(missingSettings);
@@ -355,36 +424,40 @@ function handleVersionUpgrade(settings, missingSettings, defaultSettings, curren
         if (typeof missingSettings[key] === 'object' && !Array.isArray(missingSettings[key])) {
           // For nested objects like SENTIMENT_BOUNDARIES
           const nestedKeys = Object.keys(missingSettings[key]);
-          console.log(`  - ${key}`);
+          console.log(`  - ${styles.important}${key}${colours.reset}`);
           nestedKeys.forEach(nestedKey => {
-            console.log(`    * ${nestedKey}`);
+            console.log(`    ${styles.detail}* ${nestedKey}${colours.reset}`);
           });
         } else {
           // For simple values
-          console.log(`  - ${key}`);
+          console.log(`  - ${styles.important}${key}${colours.reset}`);
         }
       });
     } else {
-      console.log('\nNo settings are missing, but version has changed.');
+      console.log(formatInfo(`${icons.info} No settings are missing, but version has changed.`));
     }
     
-    console.log('\nOptions:');
-    console.log('1. Create new settings file (delete current settings)');
-    console.log('2. Insert missing settings (keep existing settings)');
+    console.log(formatSubheading("\nOptions:"));
+    console.log(formatInfo(`${icons.settings} 1. Create new settings file (delete current settings)`));
+    console.log(formatInfo(`${icons.settings} 2. Insert missing settings (keep existing settings)`));
     
+    // Create a new readline interface - don't reuse the one from start.js
+    // to avoid conflicts
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
     
-    rl.question('\nEnter your choice (1 or 2): ', (answer) => {
+    // Using a different prompt style to avoid confusion with other prompts
+    rl.question(formatInfo(`\n${icons.menu} Enter your choice (1 or 2): `), (answer) => {
+      // Close the readline interface immediately after getting the answer
       rl.close();
       
       if (answer === '1') {
         // User chose to replace settings
         const orderedDefaultSettings = orderSettings(defaultSettings);
         fs.writeFileSync(settingsPath, JSON.stringify(orderedDefaultSettings, null, 2));
-        console.log('Created new settings file with defaults.');
+        console.log(formatSuccess(`${icons.success} Created new settings file with defaults.`));
         resolve(true);
       } else if (answer === '2') {
         // User chose to update only missing settings
@@ -392,13 +465,30 @@ function handleVersionUpgrade(settings, missingSettings, defaultSettings, curren
         updatedSettings.VERSION = currentVersion;
         const orderedUpdatedSettings = orderSettings(updatedSettings);
         fs.writeFileSync(settingsPath, JSON.stringify(orderedUpdatedSettings, null, 2));
-        console.log('Updated settings file with missing values.');
+        console.log(formatSuccess(`${icons.success} Updated settings file with missing values.`));
         resolve(true);
       } else {
-        console.log('Invalid choice. Please enter 1 or 2.');
-        // Recursively ask again
-        handleVersionUpgrade(settings, missingSettings, defaultSettings, currentVersion, settingsPath)
-          .then(resolve);
+        console.log(formatWarning(`${icons.warning} Invalid choice. Please enter 1 or 2.`));
+        // Instead of recursively calling, just wait for input again
+        const rl2 = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        rl2.question(formatInfo(`${icons.menu} Enter your choice (1 or 2): `), (answer2) => {
+          rl2.close();
+          if (answer2 === '1') {
+            const orderedDefaultSettings = orderSettings(defaultSettings);
+            fs.writeFileSync(settingsPath, JSON.stringify(orderedDefaultSettings, null, 2));
+            console.log(formatSuccess(`${icons.success} Created new settings file with defaults.`));
+          } else {
+            const updatedSettings = deepMerge(settings, missingSettings);
+            updatedSettings.VERSION = currentVersion;
+            const orderedUpdatedSettings = orderSettings(updatedSettings);
+            fs.writeFileSync(settingsPath, JSON.stringify(orderedUpdatedSettings, null, 2));
+            console.log(formatSuccess(`${icons.success} Updated settings file with missing values.`));
+          }
+          resolve(true);
+        });
       }
     });
   });
@@ -415,16 +505,7 @@ function ensureRequiredFiles() {
     let confirmDisplayed = false;
     
     // Make sure the user directory exists
-    if (!fs.existsSync(USER_DIR)) {
-      try {
-        fs.mkdirSync(USER_DIR, { recursive: true });
-        console.log('Created user directory');
-      } catch (error) {
-        console.error('Error creating user directory:', error);
-        resolve(false);
-        return;
-      }
-    }
+    ensureDirectories();
 
     // Check if .env file exists and create it if it doesn't
     if (!fs.existsSync(ENV_PATH)) {
@@ -437,18 +518,36 @@ PORT=3000
       `;
       try {
         fs.writeFileSync(ENV_PATH, defaultEnvContent.trim());
-        console.log('.env file created. Please fill in the required values before running the application again.');
+        console.log(formatSuccess(`${icons.success} .env file created. Please fill in the required values before running the application again.`));
         filesCreated = true;
       } catch (error) {
-        console.error('Error creating .env file:', error);
+        console.error(formatError(`${icons.error} Error creating .env file: ${error.message}`));
         resolve(false);
         return;
       }
     }
 
     const currentVersion = getVersion();
+    
+    // Get default token configuration
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
     const DEFAULT_SETTINGS = orderSettings({
       VERSION: currentVersion,
+      TRADING_PAIR: {
+        BASE_TOKEN: {
+          NAME: baseToken.NAME,
+          ADDRESS: baseToken.ADDRESS,
+          DECIMALS: baseToken.DECIMALS,
+          FULL_NAME: baseToken.FULL_NAME || baseToken.NAME
+        },
+        QUOTE_TOKEN: {
+          NAME: quoteToken.NAME,
+          ADDRESS: quoteToken.ADDRESS,
+          DECIMALS: quoteToken.DECIMALS
+        }
+      },
       FGI_TIMEFRAME: "15m",
       SENTIMENT_BOUNDARIES: {
         EXTREME_FEAR: 15,
@@ -467,7 +566,7 @@ PORT=3000
       STRATEGIC_PERCENTAGE: 2.5,
       USER_MONTHLY_COST: 0,
       DEVELOPER_TIP_PERCENTAGE: 0,
-      MONITOR_MODE: false,
+      MONITOR_MODE: false
     });
 
     // Check if settings.json file exists
@@ -475,18 +574,18 @@ PORT=3000
       // Create the settings file with default values
       try {
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-        console.log('settings.json file created with default values.');
+        console.log(formatSuccess(`${icons.success} settings.json file created with default values.`));
         settingsCreated = true;
         filesCreated = true;
       } catch (error) {
-        console.error('Error creating settings.json:', error);
+        console.error(formatError(`${icons.error} Error creating settings.json: ${error.message}`));
         resolve(false);
         return;
       }
       
       // If the .env file doesn't exist with valid values, we need to exit
       if (filesCreated && !fs.existsSync(ENV_PATH)) {
-        console.log('New configuration files have been created. Please review and update them as necessary before running the application again.');
+        console.log(formatInfo(`${icons.info} New configuration files have been created. Please review and update them as necessary before running the application again.`));
         resolve(false);
         return;
       }
@@ -494,25 +593,26 @@ PORT=3000
       // If only settings.json was created, ask the user if they want to continue
       if (settingsCreated && !confirmDisplayed) {
         confirmDisplayed = true;
-        // Create readline interface for user input
+        // Create readline interface for user input - NEW, not reusing
         const rl = readline.createInterface({
           input: process.stdin,
           output: process.stdout
         });
         
-        console.log('\n\x1b[32m%s\x1b[0m', 'Settings.json did not exist, so we generated it with default parameters.');
-        console.log('\x1b[32m%s\x1b[0m', 'You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.');
+        console.log(formatSuccess(`\n${icons.success} settings.json did not exist, so we generated it with default parameters.`));
+        console.log(formatInfo(`${icons.info} You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.`));
         
-        rl.question('\nConfirm Starting PulseSurfer? (Y/n): ', (answer) => {
+        rl.question(formatInfo(`\n${icons.menu} Confirm Starting PulseSurfer? (Y/n): `), (answer) => {
+          // Close immediately after getting input
           rl.close();
           
           if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes' || answer === '') {
             // User wants to continue with default settings
-            console.log('Starting with default settings...');
+            console.log(formatInfo(`${icons.info} Starting with default settings...`));
             resolve(true);
           } else {
             // User wants to exit and modify settings
-            console.log('Exiting to allow settings modification. Run the application again after updating the configuration files.');
+            console.log(formatInfo(`${icons.info} Exiting to allow settings modification. Run the application again after updating the configuration files.`));
             resolve(false);
           }
         });
@@ -533,8 +633,8 @@ PORT=3000
           return;
         }
       } catch (error) {
-        console.error('Error reading or parsing settings.json:', error);
-        console.log('Creating new settings.json file with default values.');
+        console.error(formatError(`${icons.error} Error reading or parsing settings.json: ${error.message}`));
+        console.log(formatInfo(`${icons.info} Creating new settings.json file with default values.`));
         try {
           fs.writeFileSync(SETTINGS_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2));
           filesCreated = true;
@@ -548,26 +648,26 @@ PORT=3000
               output: process.stdout
             });
             
-            console.log('\n\x1b[32m%s\x1b[0m', 'Settings.json was corrupted, so we generated a new one with default parameters.');
-            console.log('\x1b[32m%s\x1b[0m', 'You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.');
+            console.log(formatWarning(`\n${icons.warning} Settings.json was corrupted, so we generated a new one with default parameters.`));
+            console.log(formatInfo(`${icons.info} You can close this and modify them if you wish, or press Y to start PulseSurfer with default parameters.`));
             
-            rl.question('\nConfirm Starting PulseSurfer? (Y/n): ', (answer) => {
+            rl.question(formatInfo(`\n${icons.menu} Confirm Starting PulseSurfer? (Y/n): `), (answer) => {
               rl.close();
               
               if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes' || answer === '') {
                 // User wants to continue with default settings
-                console.log('Starting with default settings...');
+                console.log(formatInfo(`${icons.info} Starting with default settings...`));
                 resolve(true);
               } else {
                 // User wants to exit and modify settings
-                console.log('Exiting to allow settings modification. Run the application again after updating the configuration files.');
+                console.log(formatInfo(`${icons.info} Exiting to allow settings modification. Run the application again after updating the configuration files.`));
                 resolve(false);
               }
             });
             return;
           }
         } catch (writeError) {
-          console.error('Failed to create new settings.json file:', writeError);
+          console.error(formatError(`${icons.error} Failed to create new settings.json file: ${writeError.message}`));
           resolve(false);
           return;
         }
@@ -576,7 +676,7 @@ PORT=3000
 
     // If we've created .env file (which requires user configuration), we should exit
     if (filesCreated && !settingsCreated) {
-      console.log('New .env file has been created. Please fill in the required values before running the application again.');
+      console.log(formatInfo(`${icons.info} New .env file has been created. Please fill in the required values before running the application again.`));
       resolve(false);
       return;
     }
@@ -595,26 +695,26 @@ function validateEnvContents() {
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
   if (missingVars.length > 0) {
-      console.error(`Error: The following required environment variables are missing or empty: ${missingVars.join(', ')}`);
+      console.error(formatError(`${icons.error} The following required environment variables are missing or empty: ${missingVars.join(', ')}`));
       return false;
   }
 
   // Validate Primary RPC URL
   if (!process.env.PRIMARY_RPC.startsWith('http://') && !process.env.PRIMARY_RPC.startsWith('https://')) {
-      console.error('Error: PRIMARY_RPC must be a valid URL starting with http:// or https://');
+      console.error(formatError(`${icons.error} Error: PRIMARY_RPC must be a valid URL starting with http:// or https://`));
       return false;
   }
   
   // Warning for missing Secondary RPC
   if (!process.env.SECONDARY_RPC) {
-      console.warn('\x1b[33m%s\x1b[0m', 'Warning: No SECONDARY_RPC provided. For improved reliability, consider adding a backup RPC URL.');
+      console.log(formatWarning(`${icons.warning} Warning: No SECONDARY_RPC provided. For improved reliability, consider adding a backup RPC URL.`));
   } else if (!process.env.SECONDARY_RPC.startsWith('http://') && !process.env.SECONDARY_RPC.startsWith('https://')) {
-      console.warn('\x1b[33m%s\x1b[0m', 'Warning: SECONDARY_RPC must be a valid URL starting with http:// or https://. It will be ignored.');
+      console.log(formatWarning(`${icons.warning} Warning: SECONDARY_RPC must be a valid URL starting with http:// or https://. It will be ignored.`));
   }
 
   // Validate ADMIN_PASSWORD
   if (process.env.ADMIN_PASSWORD.length < 8) {
-      console.error('Error: ADMIN_PASSWORD must be at least 8 characters long.');
+      console.error(formatError(`${icons.error} Error: ADMIN_PASSWORD must be at least 8 characters long.`));
       return false;
   }
 
@@ -632,15 +732,29 @@ function validateEnvContents() {
  */
 function saveState(state) {
   try {
-    if (!fs.existsSync(USER_DIR)) {
-      fs.mkdirSync(USER_DIR, { recursive: true });
-    }
+    // Ensure directories exist
+    ensureDirectories();
     
-    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2));
-    devLog("State saved successfully.");
+    // Add token information to the state
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
+    const stateWithTokenInfo = {
+      ...state,
+      tokenInfo: {
+        baseToken,
+        quoteToken
+      }
+    };
+    
+    // Get token-specific file path
+    const saveStatePath = getSaveStatePath();
+    
+    fs.writeFileSync(saveStatePath, JSON.stringify(stateWithTokenInfo, null, 2));
+    devLog(formatSuccess(`${icons.success} State saved successfully to ${saveStatePath}`));
     return true;
   } catch (error) {
-    console.error("Error saving state:", error);
+    console.error(formatError(`${icons.error} Error saving state: ${error.message}`));
     return false;
   }
 }
@@ -651,27 +765,90 @@ function saveState(state) {
  */
 function loadState() {
   try {
-    if (fs.existsSync(STATE_FILE_PATH)) {
-      const data = fs.readFileSync(STATE_FILE_PATH, 'utf8');
+    // Ensure directories exist
+    ensureDirectories();
+    
+    const saveStatePath = getSaveStatePath();
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
+    devLog(formatInfo(`${icons.search} Looking for save state at: ${saveStatePath}`));
+    
+    if (fs.existsSync(saveStatePath)) {
+      const data = fs.readFileSync(saveStatePath, 'utf8');
       if (!data || data.trim() === '') {
-        devLog("State file exists but is empty");
+        devLog(formatWarning(`${icons.warning} State file exists but is empty`));
         return null;
       }
       
       const state = JSON.parse(data);
       
+      // Validate token pair in save state matches current token pair
+      if (state.tokenInfo && 
+          state.tokenInfo.baseToken && 
+          state.tokenInfo.quoteToken) {
+        
+        const savedBaseToken = state.tokenInfo.baseToken.NAME;
+        const savedQuoteToken = state.tokenInfo.quoteToken.NAME;
+        
+        if (savedBaseToken !== baseToken.NAME || 
+            savedQuoteToken !== quoteToken.NAME) {
+          devLog(formatWarning(`${icons.warning} Save state token pair (${savedBaseToken}/${savedQuoteToken}) doesn't match current token pair (${baseToken.NAME}/${quoteToken.NAME})`));
+          return null;
+        }
+      }
+      
       // Initialize orderBook with saved state if it exists
       if (state.orderBook) {
         orderBook.loadState(state.orderBook);
-        devLog("OrderBook state restored");
+        devLog(formatSuccess(`${icons.success} OrderBook state restored`));
       } else {
-        devLog("No OrderBook state found in saved state");
+        devLog(formatWarning(`${icons.warning} No OrderBook state found in saved state`));
       }
       
+      devLog(formatSuccess(`${icons.success} Successfully loaded save state for ${baseToken.NAME}/${quoteToken.NAME}`));
       return state;
+    } else {
+      // Check for legacy save state file (without token pair in filename)
+      if (fs.existsSync(LEGACY_STATE_FILE_PATH)) {
+        devLog(formatInfo(`${icons.search} Found legacy save state file, checking token compatibility...`));
+        
+        try {
+          const legacyData = fs.readFileSync(LEGACY_STATE_FILE_PATH, 'utf8');
+          if (!legacyData || legacyData.trim() === '') {
+            return null;
+          }
+          
+          const legacyState = JSON.parse(legacyData);
+          
+          // Check if token info exists and matches current tokens
+          if (legacyState.tokenInfo && 
+              legacyState.tokenInfo.baseToken && 
+              legacyState.tokenInfo.quoteToken &&
+              legacyState.tokenInfo.baseToken.NAME === baseToken.NAME &&
+              legacyState.tokenInfo.quoteToken.NAME === quoteToken.NAME) {
+            
+            devLog(formatSuccess(`${icons.success} Legacy save state contains matching token pair, using it`));
+            
+            // Initialize orderBook if needed
+            if (legacyState.orderBook) {
+              orderBook.loadState(legacyState.orderBook);
+            }
+            
+            // Save to new format for future use
+            saveState(legacyState);
+            
+            return legacyState;
+          } else {
+            devLog(formatWarning(`${icons.warning} Legacy save state has different tokens, ignoring`));
+          }
+        } catch (legacyError) {
+          devLog(formatError(`${icons.error} Error reading legacy save state: ${legacyError.message}`));
+        }
+      }
     }
   } catch (error) {
-    console.error("Error loading state:", error);
+    console.error(formatError(`${icons.error} Error loading state: ${error.message}`));
   }
   return null;
 }
@@ -683,9 +860,20 @@ function loadState() {
 function addRecentTrade(trade) {
   // Validate trade object
   if (!trade || typeof trade !== 'object') {
-    devLog("Invalid trade object, not adding to recent trades");
+    devLog(formatWarning(`${icons.warning} Invalid trade object, not adding to recent trades`));
     return;
   }
+
+  // Add token information to the trade
+  const baseToken = getBaseToken();
+  const quoteToken = getQuoteToken();
+  
+  trade.tokenInfo = {
+    baseToken: baseToken.NAME,
+    quoteToken: quoteToken.NAME,
+    baseTokenDecimals: baseToken.DECIMALS,
+    quoteTokenDecimals: quoteToken.DECIMALS
+  };
 
   // Check for duplicates
   if (recentTrades.length > 0) {
@@ -693,7 +881,7 @@ function addRecentTrade(trade) {
     if (lastTrade.timestamp === trade.timestamp &&
       lastTrade.amount === trade.amount &&
       lastTrade.price === trade.price) {
-      devLog("Duplicate trade detected, not adding to recent trades");
+      devLog(formatWarning(`${icons.warning} Duplicate trade detected, not adding to recent trades`));
       return;
     }
   }
@@ -712,7 +900,7 @@ function addRecentTrade(trade) {
  */
 function clearRecentTrades() {
   recentTrades.length = 0; // This clears the array
-  devLog("Recent trades cleared");
+  devLog(formatInfo(`${icons.info} Recent trades cleared`));
 }
 
 /**
@@ -752,11 +940,11 @@ function calculateAPY(initialValue, currentValue, runTimeInDays) {
   }
 
   try {
-    // Calculate SOL appreciation
-    const solAppreciation = (initialValue / initialData.initialSolPrice) * initialData.price;
+    // Calculate base token appreciation
+    const baseTokenAppreciation = (initialValue / initialData.initialPrice) * initialData.price;
 
-    // Calculate total return, excluding SOL/USDC market change
-    const totalReturn = (currentValue - solAppreciation) / initialValue;
+    // Calculate total return, excluding base token/quote token market change
+    const totalReturn = (currentValue - baseTokenAppreciation) / initialValue;
 
     // Calculate elapsed time in years
     const yearsElapsed = runTimeInDays / 365;
@@ -789,7 +977,7 @@ function calculateAPY(initialValue, currentValue, runTimeInDays) {
       return Math.round(apy);  // Round to the nearest whole number for values 20 or higher
     }
   } catch (error) {
-    console.error('Error calculating APY:', error);
+    console.error(formatError(`${icons.error} Error calculating APY: ${error.message}`));
     return "Error";
   }
 }
@@ -815,11 +1003,15 @@ function getLatestTradingData() {
   }
   
   try {
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
     const days = getRunTimeInDays(initialData.startTime);
     const estimatedAPY = calculateAPY(initialData.initialPortfolioValue, initialData.portfolioValue, days);
     const orderBookStats = orderBook.getTradeStatistics();
+    const settings = readSettings();
 
-    devLog(`Server Version: ${getVersion()}`);
+    devLog(formatInfo(`${icons.info} Server Version: ${getVersion()}`));
+    
     return {
       version: getVersion(),
       fearGreedIndex: initialData.fearGreedIndex,
@@ -832,11 +1024,13 @@ function getLatestTradingData() {
       portfolioValue: {
         usd: parseFloat(initialData.portfolioValue.toFixed(2)),
       },
-      solBalance: parseFloat(initialData.solBalance.toFixed(6)),
-      usdcBalance: parseFloat(initialData.usdcBalance.toFixed(2)),
+      baseBalance: parseFloat(initialData.baseBalance.toFixed(baseToken.DECIMALS)),
+      quoteBalance: parseFloat(initialData.quoteBalance.toFixed(quoteToken.DECIMALS)),
+      baseTokenBalance: parseFloat(initialData.baseBalance.toFixed(baseToken.DECIMALS)),
+      quoteTokenBalance: parseFloat(initialData.quoteBalance.toFixed(quoteToken.DECIMALS)),
       portfolioWeighting: {
-        usdc: parseFloat(((initialData.usdcBalance / initialData.portfolioValue) * 100).toFixed(2)),
-        sol: parseFloat(((initialData.solBalance * initialData.price / initialData.portfolioValue) * 100).toFixed(2))
+        quoteToken: parseFloat(((initialData.quoteBalance / initialData.portfolioValue) * 100).toFixed(2)),
+        baseToken: parseFloat(((initialData.baseBalance * initialData.price / initialData.portfolioValue) * 100).toFixed(2))
       },
       averageEntryPrice: {
         usd: initialData.averageEntryPrice > 0 ? parseFloat(initialData.averageEntryPrice.toFixed(2)) : 'N/A'
@@ -846,7 +1040,7 @@ function getLatestTradingData() {
       },
       programRunTime: formatTime(Date.now() - initialData.startTime),
       portfolioTotalChange: parseFloat(((initialData.portfolioValue - initialData.initialPortfolioValue) / initialData.initialPortfolioValue * 100).toFixed(2)),
-      solanaMarketChange: parseFloat(((initialData.price - initialData.initialSolPrice) / initialData.initialSolPrice * 100).toFixed(2)),
+      tokenMarketChange: parseFloat(((initialData.price - initialData.initialPrice) / initialData.initialPrice * 100).toFixed(2)),
       estimatedAPY: estimatedAPY,
       recentTrades: recentTrades,
       monitorMode: getMonitorMode(),
@@ -860,10 +1054,21 @@ function getLatestTradingData() {
         totalRealizedPnl: orderBookStats.totalRealizedPnl,
         totalUnrealizedPnl: orderBookStats.totalUnrealizedPnl,
         totalVolume: orderBookStats.totalVolume
+      },
+      tokenInfo: {
+        baseToken: baseToken.NAME,
+        quoteToken: quoteToken.NAME,
+        baseTokenDecimals: baseToken.DECIMALS,
+        quoteTokenDecimals: quoteToken.DECIMALS,
+        baseTokenAddress: baseToken.ADDRESS,
+        quoteTokenAddress: quoteToken.ADDRESS
+      },
+      params: {
+        FGI_TIMEFRAME: settings.FGI_TIMEFRAME || '15m'
       }
     };
   } catch (error) {
-    console.error('Error generating latest trading data:', error);
+    console.error(formatError(`${icons.error} Error generating latest trading data: ${error.message}`));
     return null;
   }
 }
@@ -893,12 +1098,37 @@ function getOrderBookStats() {
  */
 function emitTradingData(data) {
   try {
-    devLog('Server emitting trading data with version:', data.version);
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    const settings = readSettings();
     
-    if (!orderBook) {
-      console.error('OrderBook not initialized');
+    devLog(formatInfo(`${icons.network} Server emitting trading data with version: ${data.version}`));
+
+    if (!data) {
+      console.error(formatError(`${icons.error} No data provided to emitTradingData`));
       return;
     }
+    
+    if (!orderBook) {
+      console.error(formatError(`${icons.error} OrderBook not initialized`));
+      return;
+    }
+
+    devLog(`Raw data.price: ${data.price}`);
+    devLog(`Raw data.netChange: ${data.netChange}`);
+    devLog(`Raw data.portfolioValue: ${data.portfolioValue}`);
+    devLog(`Raw data.initialPrice: ${data.initialPrice}`);
+    devLog(`Raw data.initialPortfolioValue: ${data.initialPortfolioValue}`);
+    devLog(`Raw data.initialBaseBalance: ${data.initialBaseBalance}`);
+    devLog(`Raw data.initialQuoteBalance: ${data.initialQuoteBalance}`);
+
+    const price = data.price && typeof data.price === 'object' ? data.price.usd : data.price;
+    const netChange = data.netChange && typeof data.netChange === 'object' ? data.netChange.usd : data.netChange;
+    const portfolioValue = data.portfolioValue && typeof data.portfolioValue === 'object' ? data.portfolioValue.usd : data.portfolioValue;
+    const initialPrice = data.initialPrice !== undefined ? data.initialPrice : 0;
+    const initialPortfolioValue = data.initialPortfolioValue !== undefined ? data.initialPortfolioValue : 0;
+    const initialBaseBalance = data.initialBaseBalance !== undefined ? data.initialBaseBalance : 0;
+    const initialQuoteBalance = data.initialQuoteBalance !== undefined ? data.initialQuoteBalance : 0;
 
     // Get fresh orderbook data and stats
     const orderBookStats = orderBook.getTradeStatistics();
@@ -914,18 +1144,20 @@ function emitTradingData(data) {
       version: data.version,
       timestamp: data.timestamp,
       price: {
-        usd: parseFloat(data.price.toFixed(2))
+        usd: parseFloat(price.toFixed(2))
       },
       netChange: {
-        usd: parseFloat(data.netChange.toFixed(3))
+        usd: parseFloat(netChange.toFixed(3))
       },
       portfolioValue: {
-        usd: parseFloat(data.portfolioValue.toFixed(2))
+        usd: parseFloat(portfolioValue.toFixed(2))
       },
       fearGreedIndex: data.fearGreedIndex,
       sentiment: data.sentiment,
-      usdcBalance: parseFloat(data.usdcBalance.toFixed(2)),
-      solBalance: parseFloat(data.solBalance.toFixed(6)),
+      quoteBalance: parseFloat(data.quoteBalance.toFixed(quoteToken.DECIMALS)),
+      baseBalance: parseFloat(data.baseBalance.toFixed(baseToken.DECIMALS)),
+      baseTokenBalance: parseFloat(data.baseBalance.toFixed(baseToken.DECIMALS)),
+      quoteTokenBalance: parseFloat(data.quoteBalance.toFixed(quoteToken.DECIMALS)),
       averageEntryPrice: {
         usd: data.averageEntryPrice > 0 ? parseFloat(data.averageEntryPrice.toFixed(2)) : 'N/A'
       },
@@ -936,12 +1168,12 @@ function emitTradingData(data) {
       txId: data.txId || null,
       txUrl: data.txId ? `https://solscan.io/tx/${data.txId}` : null,
       portfolioWeighting: {
-        usdc: parseFloat(((data.usdcBalance / data.portfolioValue) * 100).toFixed(2)),
-        sol: parseFloat(((data.solBalance * data.price / data.portfolioValue) * 100).toFixed(2))
+        quoteToken: parseFloat(((data.quoteBalance / data.portfolioValue) * 100).toFixed(2)),
+        baseToken: parseFloat(((data.baseBalance * data.price / data.portfolioValue) * 100).toFixed(2))
       },
       programRunTime,
       portfolioTotalChange: parseFloat(((data.portfolioValue - data.initialPortfolioValue) / data.initialPortfolioValue * 100).toFixed(2)),
-      solanaMarketChange: parseFloat(((data.price - data.initialSolPrice) / data.initialSolPrice * 100).toFixed(2)),
+      tokenMarketChange: parseFloat(((data.price - data.initialPrice) / data.initialPrice * 100).toFixed(2)),
       estimatedAPY: estimatedAPY,
       monitorMode: getMonitorMode(),
       orderbook: {
@@ -955,14 +1187,25 @@ function emitTradingData(data) {
         totalVolume: orderBookStats.totalVolume
       },
       initialData: {
-        solPrice: {
-          usd: parseFloat(data.initialSolPrice.toFixed(2))
+        price: {
+          usd: parseFloat(initialPrice.toFixed(2))
         },
         portfolioValue: {
-          usd: parseFloat(data.initialPortfolioValue.toFixed(2))
+          usd: parseFloat(initialPortfolioValue.toFixed(2))
         },
-        solBalance: parseFloat(data.initialSolBalance.toFixed(6)),
-        usdcBalance: parseFloat(data.initialUsdcBalance.toFixed(2))
+        baseTokenBalance: parseFloat(initialBaseBalance.toFixed(baseToken.DECIMALS)),
+        quoteTokenBalance: parseFloat(initialQuoteBalance.toFixed(quoteToken.DECIMALS))
+      },
+      tokenInfo: {
+        baseToken: baseToken.NAME,
+        quoteToken: quoteToken.NAME,
+        baseTokenDecimals: baseToken.DECIMALS,
+        quoteTokenDecimals: quoteToken.DECIMALS,
+        baseTokenAddress: baseToken.ADDRESS,
+        quoteTokenAddress: quoteToken.ADDRESS
+      },
+      params: {
+        FGI_TIMEFRAME: settings.FGI_TIMEFRAME || '15m'
       }
     };
 
@@ -973,7 +1216,7 @@ function emitTradingData(data) {
     initialData = { ...data, recentTrades };
     delete initialData.version; // Remove version from initialData
   } catch (error) {
-    console.error('Error emitting trading data:', error);
+    console.error(formatError(`${icons.error} Error emitting trading data: ${error.message}`));
   }
 }
 
@@ -1041,6 +1284,31 @@ app.get('/api/recent-trades', (req, res) => {
   res.json(recentTrades);
 });
 
+// Token information route
+app.get('/api/token-info', (req, res) => {
+  try {
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
+    res.json({
+      baseToken: {
+        name: baseToken.NAME,
+        address: baseToken.ADDRESS,
+        decimals: baseToken.DECIMALS,
+        fullName: baseToken.FULL_NAME || baseToken.NAME
+      },
+      quoteToken: {
+        name: quoteToken.NAME,
+        address: quoteToken.ADDRESS,
+        decimals: quoteToken.DECIMALS
+      }
+    });
+  } catch (error) {
+    console.error(formatError(`${icons.error} Error getting token info: ${error.message}`));
+    res.status(500).json({ error: 'Failed to get token info' });
+  }
+});
+
 // Settings update route
 app.post('/api/params', (req, res) => {
   try {
@@ -1050,7 +1318,7 @@ app.post('/api/params', (req, res) => {
     paramUpdateEmitter.emit('paramsUpdated', tradingParams);
     res.json({ message: 'Parameters updated successfully', params: tradingParams });
   } catch (error) {
-    console.error('Error updating parameters:', error);
+    console.error(formatError(`${icons.error} Error updating parameters: ${error.message}`));
     res.status(500).json({ error: 'Failed to update parameters' });
   }
 });
@@ -1058,15 +1326,15 @@ app.post('/api/params', (req, res) => {
 // Trading restart route
 app.post('/api/restart', authenticate, (req, res) => {
   try {
-    console.log("Restart trading request received");
+    console.log(formatInfo(`${icons.cycle} Restart trading request received`));
     const wallet = getWallet();
     const connection = getConnection();
-    devLog("Wallet in restart endpoint:", wallet ? "Defined" : "Undefined");
-    devLog("Connection in restart endpoint:", connection ? "Defined" : "Undefined");
+    devLog(`Wallet in restart endpoint: ${wallet ? "Defined" : "Undefined"}`);
+    devLog(`Connection in restart endpoint: ${connection ? "Defined" : "Undefined"}`);
     paramUpdateEmitter.emit('restartTrading');
     res.json({ success: true, message: 'Trading restart initiated' });
   } catch (error) {
-    console.error('Error restarting trading:', error);
+    console.error(formatError(`${icons.error} Error restarting trading: ${error.message}`));
     res.status(500).json({ error: 'Failed to restart trading' });
   }
 });
@@ -1077,30 +1345,37 @@ app.get('/api/orderbook-stats', authenticate, (req, res) => {
     const stats = orderBook.getTradeStatistics();
     res.json(stats);
   } catch (error) {
-    console.error('Error getting orderbook stats:', error);
+    console.error(formatError(`${icons.error} Error getting orderbook stats: ${error.message}`));
     res.status(500).json({ error: 'Failed to get orderbook stats' });
   }
 });
 
 app.get('/api/orderbook', authenticate, (req, res) => {
   try {
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
     const trades = orderBook.trades.map(trade => ({
       id: trade.id,
       timestamp: trade.timestamp,
       direction: trade.direction,
       status: trade.status,
       price: parseFloat(trade.price.toFixed(2)),
-      solAmount: parseFloat(trade.solAmount.toFixed(6)),
-      value: parseFloat(trade.value.toFixed(2)),
+      baseTokenAmount: parseFloat(trade.baseTokenAmount.toFixed(baseToken.DECIMALS)),
+      quoteTokenValue: parseFloat(trade.quoteTokenValue.toFixed(quoteToken.DECIMALS)),
       upnl: trade.status === 'open' ? parseFloat(trade.upnl.toFixed(2)) : null,
       realizedPnl: trade.status === 'closed' ? parseFloat(trade.realizedPnl.toFixed(2)) : null,
       closedAt: trade.closedAt || null,
       closePrice: trade.closePrice ? parseFloat(trade.closePrice.toFixed(2)) : null,
-      txUrl: trade.id ? `https://solscan.io/tx/${trade.id}` : null
+      txUrl: trade.id ? `https://solscan.io/tx/${trade.id}` : null,
+      tokenInfo: trade.tokenInfo || {
+        baseToken: baseToken.NAME,
+        quoteToken: quoteToken.NAME
+      }
     }));
     res.json({ trades, stats: orderBook.getTradeStatistics() });
   } catch (error) {
-    console.error('Error getting orderbook:', error);
+    console.error(formatError(`${icons.error} Error getting orderbook: ${error.message}`));
     res.status(500).json({ error: 'Failed to get orderbook' });
   }
 });
@@ -1111,18 +1386,35 @@ app.get('/api/orderbook', authenticate, (req, res) => {
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  devLog('\nNew client connected');
+  devLog(formatInfo(`\n${icons.network} New client connected`));
   
-  // Send server identification
+  // Get token information
+  const baseToken = getBaseToken();
+  const quoteToken = getQuoteToken();
+  const settings = readSettings();
+  const timeframe = settings.FGI_TIMEFRAME || '15m';
+  
+  // Send server identification with complete token info
   socket.emit('serverIdentification', {
     type: 'pulse',
     name: 'PulseSurfer',
-    version: getVersion()
+    version: getVersion(),
+    tokenInfo: {
+      baseToken: baseToken.NAME,
+      quoteToken: quoteToken.NAME,
+      baseTokenDecimals: baseToken.DECIMALS,
+      quoteTokenDecimals: quoteToken.DECIMALS,
+      baseTokenAddress: baseToken.ADDRESS,
+      quoteTokenAddress: quoteToken.ADDRESS
+    },
+    params: {
+      FGI_TIMEFRAME: timeframe
+    }
   });
   
   // Listen for disconnection
   socket.on('disconnect', () => {
-    devLog('\nClient disconnected');
+    devLog(formatInfo(`\n${icons.network} Client disconnected`));
   });
 });
 
@@ -1146,7 +1438,7 @@ async function startServer() {
     // Now that we've ensured the settings file exists, we can safely read it
     tradingParams = readSettings();
     if (!tradingParams) {
-      console.error('Failed to read settings after creation. Please check file permissions.');
+      console.error(formatError(`${icons.error} Failed to read settings after creation. Please check file permissions.`));
       process.exit(1);
     }
     
@@ -1155,19 +1447,20 @@ async function startServer() {
     
     // Validate .env contents  
     if (!validateEnvContents()) {
-      console.log('Exiting due to invalid .env configuration. Please update the .env file and run the application again.');
+      console.log(formatInfo(`${icons.info} Exiting due to invalid .env configuration. Please update the .env file and run the application again.`));
       process.exit(1);
     }
     
     // Set up server
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
-      console.log(`\nLocal Server Running On: http://localhost:${PORT}`);
+      console.log(formatHeading(`\n=== SERVER STARTED ===`));
+      console.log(formatSuccess(`${icons.network} Local Server Running On: http://localhost:${PORT}`));
     });
     
     return true;
   } catch (error) {
-    console.error('Error during server startup:', error);
+    console.error(formatError(`${icons.error} Error during server startup: ${error.message}`));
     process.exit(1);
   }
 }

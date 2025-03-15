@@ -1,6 +1,6 @@
 /**
  * PulseSurfer Trading Bot
- * Automated trading system that uses sentiment analysis to trade SOL/USDC
+ * Automated trading system that uses sentiment analysis to trade Solana Tokens
  */
 
 // Core dependencies
@@ -9,13 +9,13 @@ const OrderBook = require('./orderBook');
 const { 
     executeSwap, 
     executeExactOutSwap, 
-    updatePortfolioBalances, 
-    USDC, 
-    SOL, 
+    updatePortfolioBalances,
     updatePositionFromSwap, 
     logPositionUpdate, 
     cancelPendingBundle, 
-    calculateTradeAmount 
+    calculateTradeAmount,
+    BASE_TOKEN,
+    QUOTE_TOKEN
 } = require('./trading');
 const { 
     fetchFearGreedIndex, 
@@ -30,7 +30,28 @@ const {
     logTradingData, 
     getVersion, 
     loadEnvironment, 
-    devLog 
+    devLog,
+    getBaseToken,
+    getQuoteToken,
+    // Import styling utilities
+    formatHeading,
+    formatSubheading,
+    formatSuccess,
+    formatError,
+    formatWarning,
+    formatInfo,
+    formatPrice,
+    formatSentiment,
+    formatPercentage,
+    horizontalLine,
+    padRight,
+    padLeft,
+    formatTimestamp,
+    formatBalance,
+    formatTokenChange,
+    icons,
+    styles,
+    colours
 } = require('./utils');
 const { 
     startServer, 
@@ -67,17 +88,17 @@ let connection = null;
 let progressInterval = null;
 
 // Configuration
-const MIN_USD_VALUE = 5; // Minimum USD value to keep in the wallet
+const MIN_USD_VALUE = 1; // Minimum USD value to keep in the wallet
 const MAX_TRADE_ATTEMPTS = 10;
 const RETRY_DELAY = 5000; // 5 seconds
 
 /**
- * Progress bar for visualizing wait time between trading cycles
+ * Progress bar for visualising wait time between trading cycles
  */
 const progressBar = new cliProgress.SingleBar({
-    format: 'Progress |{bar}| {percentage}% | {remainingTime} remaining | {timeframe}',
-    barCompleteChar: '\u2588',
-    barIncompleteChar: '\u2591',
+    format: `${styles.info}${icons.wait} Progress ${colours.reset}|{bar}| {percentage}% | ${styles.time}{remainingTime}${colours.reset} remaining | ${styles.info}{timeframe}${colours.reset}`,
+    barCompleteChar: '█',
+    barIncompleteChar: '░',
     hideCursor: true,
     stopOnComplete: true,
     clearOnComplete: true
@@ -92,7 +113,7 @@ function cleanupProgressBar() {
             progressBar.stop();
         }
     } catch (error) {
-        console.error('Error cleaning up progress bar:', error);
+        console.error(formatError(`Error cleaning up progress bar: ${error.message}`));
     }
 }
 
@@ -135,7 +156,7 @@ function startProgressBar(totalSeconds, timeframe = '15m') {
                     timeframe: timeframe
                 });
             } catch (error) {
-                console.error('Error updating progress bar:', error);
+                console.error(formatError(`Error updating progress bar: ${error.message}`));
                 clearInterval(updateInterval);
                 cleanupProgressBar();
             }
@@ -143,7 +164,7 @@ function startProgressBar(totalSeconds, timeframe = '15m') {
 
         return updateInterval;
     } catch (error) {
-        console.error('Error starting progress bar:', error);
+        console.error(formatError(`Error starting progress bar: ${error.message}`));
         return null;
     }
 }
@@ -152,30 +173,33 @@ function startProgressBar(totalSeconds, timeframe = '15m') {
  * Verifies if a trade will leave sufficient balance
  * @param {number} balance - Current balance
  * @param {number} amount - Trade amount
- * @param {boolean} isSol - Is SOL balance (vs USDC)
- * @param {number} currentPrice - Current SOL price
+ * @param {boolean} isBaseToken - Is base token balance (vs quote token)
+ * @param {number} currentPrice - Current token price
  * @returns {boolean} - True if balance will be sufficient
  */
-async function minimumBalanceCheck(balance, amount, isSol, currentPrice) {
+async function minimumBalanceCheck(balance, amount, isBaseToken, currentPrice) {
     try {
         if (typeof balance !== 'number' || isNaN(balance) ||
             typeof amount !== 'number' || isNaN(amount) ||
             typeof currentPrice !== 'number' || isNaN(currentPrice)) {
-            console.error('Invalid inputs for minimum balance check');
+            console.error(formatError('Invalid inputs for minimum balance check'));
             return false;
         }
         
-        const balanceInUSD = isSol ? balance * currentPrice : balance;
-        const amountInUSD = isSol ? amount * currentPrice : amount;
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
+        
+        const balanceInUSD = isBaseToken ? balance * currentPrice : balance;
+        const amountInUSD = isBaseToken ? amount * currentPrice : amount;
         const remainingBalanceUSD = balanceInUSD - amountInUSD;
         
         if (remainingBalanceUSD < MIN_USD_VALUE) {
-            console.log(`${getTimestamp()}: Trade blocked - Would leave ${isSol ? 'SOL' : 'USDC'} balance below $${MIN_USD_VALUE}`);
+            console.log(formatWarning(`${icons.warning} Trade blocked - Would leave ${isBaseToken ? baseToken.NAME : quoteToken.NAME} balance below $${MIN_USD_VALUE}`));
             return false;
         }
         return true;
     } catch (error) {
-        console.error('Error in minimum balance check:', error);
+        console.error(formatError(`Error in minimum balance check: ${error.message}`));
         return false;
     }
 }
@@ -183,7 +207,7 @@ async function minimumBalanceCheck(balance, amount, isSol, currentPrice) {
 /**
  * Checks for and closes a profitable opposite-direction trade
  * @param {string} sentiment - Current market sentiment
- * @param {number} currentPrice - Current SOL price
+ * @param {number} currentPrice - Current token price
  * @returns {Object|null} - Result of closing trade or null
  */
 async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
@@ -192,7 +216,7 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
         const isGreedSentiment = ["GREED", "EXTREME_GREED"].includes(sentiment);
         
         if (!isFearSentiment && !isGreedSentiment) {
-            devLog(`Current sentiment (${sentiment}) not appropriate for trading`);
+            console.log(formatWarning(`${icons.info} CLOSING: Current sentiment (${formatSentiment(sentiment)}) not appropriate for trading`));
             return null;
         }
 
@@ -203,54 +227,53 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
         );
         
         if (!oldestMatchingTrade) {
-            devLog(`No opposing trades found to close in ${sentiment} sentiment`);
+            console.log(formatWarning(`${icons.info} CLOSING: No opposing trades found to close in ${formatSentiment(sentiment)} sentiment`));
             return null;
         }
         
-        devLog(`Found opposing trade to close:`, oldestMatchingTrade);
+        const shortId = oldestMatchingTrade.id.substring(0, 8) + '...';
+        console.log(formatInfo(`${icons.trade} CLOSING: Found opposing trade to close: ID ${styles.important}${shortId}${colours.reset}`));
         
         try {
+            const baseToken = getBaseToken();
+            const quoteToken = getQuoteToken();
             const isClosingBuy = oldestMatchingTrade.direction === 'sell';
             
             const exactOutAmount = isClosingBuy ? 
-                Math.floor(oldestMatchingTrade.solAmount * Math.pow(10, SOL.DECIMALS)) :
-                Math.floor(oldestMatchingTrade.value * Math.pow(10, USDC.DECIMALS));
-            
-            devLog(`Closing trade details:`, {
-                originalTrade: {
-                    direction: oldestMatchingTrade.direction,
-                    solAmount: oldestMatchingTrade.solAmount,
-                    value: oldestMatchingTrade.value,
-                },
-                closingTrade: {
-                    action: isClosingBuy ? 'buy' : 'sell',
-                    exactOutAmount,
-                    expectedUsdcAmount: oldestMatchingTrade.value
-                }
-            });
+                Math.floor(oldestMatchingTrade.baseTokenAmount * Math.pow(10, baseToken.DECIMALS)) :
+                Math.floor(oldestMatchingTrade.quoteTokenValue * Math.pow(10, quoteToken.DECIMALS));
+
+            console.log(formatInfo(
+                `${icons.trade} CLOSING TRADE DETAILS:`
+            ));
+            console.log(`  ${isClosingBuy ? styles.positive + 'Direction: Buy' + colours.reset : styles.negative + 'Direction: Sell' + colours.reset}`);
+            console.log(`  ${formatBalance(oldestMatchingTrade.baseTokenAmount, baseToken.NAME)} @ ${formatPrice(currentPrice)}`);
+            console.log(`  Quote value: ${formatBalance(oldestMatchingTrade.quoteTokenValue, quoteToken.NAME)}`);
             
             // Execute the swap to close the position
             const swapResult = await executeExactOutSwap(
                 wallet,
-                isClosingBuy ? SOL.ADDRESS : USDC.ADDRESS,
+                isClosingBuy ? baseToken.ADDRESS : quoteToken.ADDRESS,
                 exactOutAmount,
-                isClosingBuy ? USDC.ADDRESS : SOL.ADDRESS
+                isClosingBuy ? quoteToken.ADDRESS : baseToken.ADDRESS
             );
 
             if (swapResult) {
-                devLog('Closing trade swap successful:', swapResult);
+                console.log(formatSuccess(`${icons.success} CLOSING: Swap executed successfully`));
                 return {
                     swapResult,
                     closedTradeId: oldestMatchingTrade.id
                 };
+            } else {
+                console.log(formatError(`${icons.error} CLOSING: Swap failed`));
             }
         } catch (error) {
-            console.error('Error executing swap to close opposing trade:', error);
+            console.error(formatError(`CLOSING: Error executing swap: ${error.message}`));
         }
         
         return null;
     } catch (error) {
-        console.error('Error in checkAndCloseOpposingTrade:', error);
+        console.error(formatError(`CLOSING: Error in trade operation: ${error.message}`));
         return null;
     }
 }
@@ -278,7 +301,7 @@ async function hasOpposingTrades(sentiment) {
         
         return oldestMatchingTrade !== null;
     } catch (error) {
-        console.error('Error checking for opposing trades:', error);
+        console.error(formatError(`Error checking for opposing trades: ${error.message}`));
         return false;
     }
 }
@@ -293,35 +316,41 @@ async function executeOpeningTrade(sentiment) {
     
     while (attempt <= MAX_TRADE_ATTEMPTS && !isCurrentExecutionCancelled) {
         try {
-            console.log(`Opening Trade (Attempt ${attempt}/${MAX_TRADE_ATTEMPTS})...`);
-            const isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
-            const balance = isBuying ? wallet.usdcBalance : wallet.solBalance;
+            const baseToken = getBaseToken();
+            const quoteToken = getQuoteToken();
             
-            const rawTradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? USDC : SOL);
-            const tradeAmount = rawTradeAmount / Math.pow(10, isBuying ? USDC.DECIMALS : SOL.DECIMALS);
+            console.log(formatInfo(`${icons.open} OPENING: Attempt ${attempt}/${MAX_TRADE_ATTEMPTS}`));
+            const isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
+            const balance = isBuying ? wallet.quoteBalance : wallet.baseBalance;
+            
+            // Using the configured tokens for the calculation
+            const inputToken = isBuying ? quoteToken : baseToken;
+            const rawTradeAmount = calculateTradeAmount(balance, sentiment, inputToken);
+            const tradeAmount = rawTradeAmount / Math.pow(10, inputToken.DECIMALS);
             
             // Check if trade would leave minimum balance
             if (!await minimumBalanceCheck(balance, tradeAmount, !isBuying, currentPrice)) {
-                console.log(`${getTimestamp()}: Trade skipped - minimum balance protection`);
+                console.log(formatWarning(`${icons.warning} OPENING: Trade skipped - minimum balance protection`));
                 return null;
             }
     
-            console.log(`Placing ${isBuying ? 'Buy' : 'Sell'} Trade...`);
-            const swapResult = await executeSwap(wallet, sentiment, USDC, SOL);
+            console.log(formatInfo(`${icons.trade} OPENING: Placing ${isBuying ? styles.positive + 'Buy' + colours.reset : styles.negative + 'Sell' + colours.reset} Trade...`));
+            // Pass the actual token objects to executeSwap
+            const swapResult = await executeSwap(wallet, sentiment);
             
             if (swapResult === 'cooldownfail' || swapResult === 'fgichangefail') {
                 // Don't retry for these conditions
-                console.log(`${getTimestamp()}: Trade failed due to cooldown or FGI change - skipping retry`);
+                console.log(formatWarning(`${icons.warning} OPENING: Trade failed due to cooldown or FGI change - skipping retry`));
                 return swapResult;
             } else if (swapResult) {
                 return swapResult;
             }
         } catch (error) {
-            console.error(`Error executing opening trade (attempt ${attempt}):`, error);
+            console.error(formatError(`OPENING: Error on attempt ${attempt}/${MAX_TRADE_ATTEMPTS}: ${error.message}`));
         }
         
         if (attempt < MAX_TRADE_ATTEMPTS && !isCurrentExecutionCancelled) {
-            console.log(`${getTimestamp()}: Opening trade attempt ${attempt} failed - retrying in ${RETRY_DELAY/1000} seconds...`);
+            console.log(formatWarning(`${icons.wait} OPENING: Attempt ${attempt} failed - retrying in ${RETRY_DELAY/1000}s...`));
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         }
         
@@ -341,18 +370,18 @@ async function executeClosingTrade(sentiment) {
     
     while (attempt <= MAX_TRADE_ATTEMPTS && !isCurrentExecutionCancelled) {
         try {
-            console.log(`Closing Trade (Attempt ${attempt}/${MAX_TRADE_ATTEMPTS})...`);
+            console.log(formatInfo(`${icons.close} CLOSING: Attempt ${attempt}/${MAX_TRADE_ATTEMPTS}`));
             const closingResult = await checkAndCloseOpposingTrade(sentiment, currentPrice);
             
             if (closingResult) {
                 return closingResult;
             }
         } catch (error) {
-            console.error(`Error executing closing trade (attempt ${attempt}):`, error);
+            console.error(formatError(`CLOSING: Error on attempt ${attempt}/${MAX_TRADE_ATTEMPTS}: ${error.message}`));
         }
         
         if (attempt < MAX_TRADE_ATTEMPTS && !isCurrentExecutionCancelled) {
-            console.log(`${getTimestamp()}: Closing trade attempt ${attempt} failed - retrying in ${RETRY_DELAY/1000} seconds...`);
+            console.log(formatWarning(`${icons.wait} CLOSING: Attempt ${attempt} failed - retrying in ${RETRY_DELAY/1000}s...`));
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         }
         
@@ -367,22 +396,62 @@ async function executeClosingTrade(sentiment) {
  * @param {Object} stats - Trading statistics
  */
 function displayEnhancedStatistics(stats) {
-    console.log("\n--- Enhanced Trading Statistics ---");
-    console.log(`Total Script Runtime: ${stats.totalRuntime} hours`);
-    console.log(`Total Cycles: ${stats.totalCycles}`);
-    console.log(`Portfolio Value: $${stats.portfolioValue.initial} -> $${stats.portfolioValue.current} (${stats.portfolioValue.change >= 0 ? '+' : ''}${stats.portfolioValue.change}) (${stats.portfolioValue.percentageChange}%)`);
-    console.log(`SOL Price: $${stats.solPrice.initial} -> $${stats.solPrice.current} (${stats.solPrice.percentageChange}%)`);
-    console.log(`Net Change: $${stats.netChange}`);
-    console.log(`Total Volume: ${stats.totalVolume.sol} SOL / ${stats.totalVolume.usdc} USDC ($${stats.totalVolume.usd})`);
-    console.log(`Balances: SOL: ${stats.balances.sol.initial} -> ${stats.balances.sol.current}, USDC: ${stats.balances.usdc.initial} -> ${stats.balances.usdc.current}`);
-    console.log(`Average Prices: Entry: $${stats.averagePrices.entry}, Sell: $${stats.averagePrices.sell}`);
-    console.log("------------------------------------\n");
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
+    console.log(formatHeading("=== TRADING STATISTICS ==="));
+    
+    // Runtime and cycle information
+    console.log(`${icons.time} Runtime: ${styles.info}${stats.totalRuntime}${colours.reset} hours | Cycles: ${styles.info}${stats.totalCycles}${colours.reset}`);
+    
+    // Portfolio value
+    const portfolioChangeValue = parseFloat(stats.portfolioValue.change);
+    const portfolioChangePercent = parseFloat(stats.portfolioValue.percentageChange);
+    console.log(
+        `${icons.chart} Portfolio: ${formatPrice(stats.portfolioValue.initial)} → ${formatPrice(stats.portfolioValue.current)} ` +
+        `(${formatTokenChange(portfolioChangeValue, '$')}) (${formatPercentage(portfolioChangePercent)})`
+    );
+    
+    // Token price information
+    const priceChange = parseFloat(stats.tokenPrice.percentageChange);
+    console.log(
+        `${icons.price} ${baseToken.NAME} Price: ${formatPrice(stats.tokenPrice.initial)} → ${formatPrice(stats.tokenPrice.current)} ` +
+        `(${formatPercentage(priceChange)})`
+    );
+    
+    // Net change 
+    const netChange = parseFloat(stats.netChange);
+    console.log(`${icons.profit} Net Change: ${formatTokenChange(netChange, '$')}`);
+    
+    // Volume information
+    console.log(
+        `${icons.trade} Total Volume: ${styles.balance}${stats.totalVolume.baseToken || stats.totalVolume.sol}${colours.reset} ${baseToken.NAME} / ` +
+        `${styles.balance}${stats.totalVolume.quoteToken}${colours.reset} ${quoteToken.NAME} (${formatPrice(stats.totalVolume.usd)})`
+    );
+    
+    // Balance information
+    const baseInitial = stats.balances.baseToken?.initial || stats.balances.sol.initial;
+    const baseCurrent = stats.balances.baseToken?.current || stats.balances.sol.current;
+    const quoteInitial = stats.balances.quoteToken?.initial;
+    const quoteCurrent = stats.balances.quoteToken?.current;
+    
+    console.log(
+        `${icons.balance} Balances: ${baseToken.NAME}: ${styles.balance}${baseInitial}${colours.reset} → ${styles.balance}${baseCurrent}${colours.reset}, ` +
+        `${quoteToken.NAME}: ${styles.balance}${quoteInitial}${colours.reset} → ${styles.balance}${quoteCurrent}${colours.reset}`
+    );
+    
+    // Average prices
+    console.log(
+        `${icons.stats} Average Prices: Entry: ${formatPrice(stats.averagePrices.entry)}, ` +
+        `Sell: ${stats.averagePrices.sell === '0.00' ? styles.detail + 'N/A' + colours.reset : formatPrice(stats.averagePrices.sell)}`
+    );
+    
 }
 
 /**
  * Prepare trading data for UI and state persistence
  * @param {string} timestamp - Current timestamp
- * @param {number} currentPrice - Current SOL price
+ * @param {number} currentPrice - Current token price
  * @param {number} fearGreedIndex - Current Fear & Greed Index
  * @param {string} sentiment - Current market sentiment
  * @param {string} txId - Transaction ID (if any)
@@ -390,24 +459,33 @@ function displayEnhancedStatistics(stats) {
  * @returns {Object} - Trading data object
  */
 function prepareTradingData(timestamp, currentPrice, fearGreedIndex, sentiment, txId, enhancedStats) {
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
     return {
         version: getVersion(),
         timestamp,
         price: currentPrice,
         fearGreedIndex,
         sentiment,
-        usdcBalance: position.usdcBalance,
-        solBalance: position.solBalance,
+        quoteBalance: position.quoteBalance,
+        baseBalance: position.baseBalance,
         portfolioValue: parseFloat(enhancedStats.portfolioValue.current),
         netChange: parseFloat(enhancedStats.netChange),
         averageEntryPrice: parseFloat(enhancedStats.averagePrices.entry) || 0,
         averageSellPrice: parseFloat(enhancedStats.averagePrices.sell) || 0,
         txId,
-        initialSolPrice: position.initialPrice,
+        initialPrice: position.initialPrice,
         initialPortfolioValue: position.initialValue,
-        initialSolBalance: position.initialSolBalance,
-        initialUsdcBalance: position.initialUsdcBalance,
-        startTime: position.startTime
+        initialBaseBalance: position.initialBaseBalance,
+        initialQuoteBalance: position.initialQuoteBalance,
+        startTime: position.startTime,
+        tokenInfo: {
+            quoteToken: quoteToken.NAME,
+            baseToken: baseToken.NAME,
+            quoteTokenDecimals: quoteToken.DECIMALS,
+            baseTokenDecimals: baseToken.DECIMALS
+        }
     };
 }
 
@@ -418,21 +496,21 @@ function prepareTradingData(timestamp, currentPrice, fearGreedIndex, sentiment, 
 function savePositionState(tradingData) {
     saveState({
         position: {
-            solBalance: position.solBalance,
-            usdcBalance: position.usdcBalance,
-            initialSolBalance: position.initialSolBalance,
-            initialUsdcBalance: position.initialUsdcBalance,
+            quoteBalance: position.quoteBalance,
+            baseBalance: position.baseBalance,
+            initialQuoteBalance: position.initialQuoteBalance,
+            initialBaseBalance: position.initialBaseBalance,
             initialPrice: position.initialPrice,
             initialValue: position.initialValue,
-            totalSolBought: position.totalSolBought,
-            totalUsdcSpent: position.totalUsdcSpent,
-            totalSolSold: position.totalSolSold,
-            totalUsdcReceived: position.totalUsdcReceived,
-            netSolTraded: position.netSolTraded,
+            totalQuoteBought: position.totalQuoteBought,
+            totalBaseSpent: position.totalBaseSpent,
+            totalQuoteSold: position.totalQuoteSold,
+            totalBaseReceived: position.totalBaseReceived,
+            netQuoteTraded: position.netQuoteTraded,
             startTime: position.startTime,
             totalCycles: position.totalCycles,
-            totalVolumeSol: position.totalVolumeSol,
-            totalVolumeUsdc: position.totalVolumeUsdc,
+            totalVolumeQuote: position.totalVolumeQuote,
+            totalVolumeBase: position.totalVolumeBase,
             trades: position.trades || []
         },
         tradingData,
@@ -451,7 +529,10 @@ async function scheduleNextExecution() {
         
         const waitTime = getWaitTime();
         const nextExecutionTime = new Date(Date.now() + waitTime);
-        console.log(`\nNext trading update (${timeframe}) at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
+        
+        console.log(formatHeading("=== NEXT CYCLE ==="));
+        console.log(formatInfo(`${icons.wait} Next trading update (${timeframe}) at ${nextExecutionTime.toLocaleTimeString()}`));
+        console.log(formatInfo(`${icons.time} Time until next cycle: ${formatTime(waitTime)}`));
 
         const totalSeconds = Math.ceil(waitTime / 1000);
         
@@ -472,12 +553,12 @@ async function scheduleNextExecution() {
 
         devLog('Next execution scheduled successfully');
     } catch (scheduleError) {
-        console.error('Error scheduling next execution:', scheduleError);
+        console.error(formatError(`Error scheduling next execution: ${scheduleError.message}`));
         cleanupProgressBar();
         
         // Align with the expected cycles rather than using a fixed delay
         const waitTime = getWaitTime();
-        console.log(`Error occurred. Waiting until next expected cycle in ${formatTime(waitTime)}`);
+        console.log(formatWarning(`${icons.wait} Error occurred. Waiting until next expected cycle in ${formatTime(waitTime)}`));
         setTimeout(async () => {
             if (!isCurrentExecutionCancelled) {
                 await main();
@@ -504,11 +585,15 @@ async function main() {
         // Get the current FGI timeframe
         const settings = readSettings();
         const timeframe = settings.FGI_TIMEFRAME || "15m";
+        
+        // Get token configurations
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
 
         // Fetch current market data
         const fearGreedIndex = await fetchFearGreedIndex();
         const sentiment = getSentiment(fearGreedIndex);
-        currentPrice = await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
+        currentPrice = await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
         const timestamp = getTimestamp();
 
         // Log trading data
@@ -516,9 +601,10 @@ async function main() {
         devLog(`Data Logged: ${timestamp}, ${currentPrice}, ${fearGreedIndex}`);
 
         // Display current cycle info with timeframe
-        console.log(`\n--- Trading Cycle (${timeframe}): ${timestamp} ---`);
-        console.log(`Fear & Greed Index: ${fearGreedIndex} - Sentiment: ${sentiment}`);
-        console.log(`Current SOL Price: $${currentPrice.toFixed(2)}`);
+        console.log(horizontalLine());
+        console.log(formatHeading(`=== TRADING CYCLE (${timeframe}): ${timestamp} ===`));
+        console.log(`${icons.sentiment} Sentiment: ${formatSentiment(sentiment)} | Fear & Greed Index: ${padLeft(fearGreedIndex, 2)}`);
+        console.log(`${icons.price} Current ${baseToken.NAME} Price: ${formatPrice(currentPrice)}`);
 
         // Update portfolio balances
         devLog("Updating portfolio balances...");
@@ -526,14 +612,14 @@ async function main() {
         connection = getConnection();
         
         if (!wallet || !connection) {
-            throw new Error("Wallet or connection is not initialized");
+            throw new Error("Wallet or connection is not initialised");
         }
         
-        const { solBalance, usdcBalance } = await updatePortfolioBalances(wallet, connection);
-        devLog(`Updated balances - SOL: ${solBalance}, USDC: ${usdcBalance}`);
+        const { baseBalance, quoteBalance } = await updatePortfolioBalances(wallet, connection);
+        console.log(`${icons.balance} Balance: ${formatBalance(baseBalance, baseToken.NAME)} | ${formatBalance(quoteBalance, quoteToken.NAME)}`);
 
         // Update position and orderbook
-        position.updateBalances(solBalance, usdcBalance);
+        position.updateBalances(baseBalance, quoteBalance);
         orderBook.updateTradeUPNL(currentPrice);
 
         // Check if execution was cancelled during data fetch
@@ -549,74 +635,93 @@ async function main() {
 
         // Pulse trading logic - trade on any non-neutral sentiment
         if (!MONITOR_MODE && sentiment !== "NEUTRAL") {
-            let success = false;
-        
-            // Check for closing trades first
+            // Check if we have any positions to close and if we can open new ones
             const hasPositionToClose = await hasOpposingTrades(sentiment);
-        
+            
+            // Set up parallel execution of close and open trades
+            const tradeOperations = [];
+            
+            console.log(formatHeading("=== PARALLEL TRADING OPERATIONS ==="));
+            
+            // Add closing trade operation if needed
             if (hasPositionToClose) {
-                // Execute closing trade
-                console.log("Found opposing position to close");
-                const closingResult = await executeClosingTrade(sentiment);
-                
-                if (closingResult) {
-                    swapResult = closingResult.swapResult;
-                    orderBook.closeTrade(closingResult.closedTradeId, swapResult.price);
-                    success = true;
-                    console.log(`${getTimestamp()}: Successfully closed trade ID: ${closingResult.closedTradeId}`);
-                } else {
-                    console.log(`${getTimestamp()}: Failed to close opposing position after ${MAX_TRADE_ATTEMPTS} attempts`);
-                }
-            } else {
-                // Execute opening trade
-                console.log("Opening new position");
-                swapResult = await executeOpeningTrade(sentiment);
-                
-                if (swapResult && swapResult !== 'cooldownfail' && swapResult !== 'fgichangefail') {
-                    success = true;
-                    console.log(`${getTimestamp()}: Successfully opened new position`);
-                } else if (swapResult === 'cooldownfail' || swapResult === 'fgichangefail') {
-                    console.log(`${getTimestamp()}: Trade skipped due to cooldown or FGI change`);
-                } else {
-                    console.log(`${getTimestamp()}: Failed to open position after ${MAX_TRADE_ATTEMPTS} attempts`);
-                }
+                console.log(formatInfo(`${icons.close} CLOSING OPERATION: Found opposing position to close - starting operation`));
+                const closingOperation = executeClosingTrade(sentiment)
+                    .then(result => ({ type: 'close', result }));
+                tradeOperations.push(closingOperation);
             }
-        
-            // Process successful trade
-            if (swapResult && swapResult !== 'cooldownfail' && swapResult !== 'fgichangefail') {
-                txId = swapResult.txId;
-
-                // Update orderbook for new positions only
-                if (!hasPositionToClose) {
-                    devLog('New position trade successful, updating orderbook...', {
-                        price: swapResult.price,
-                        solChange: swapResult.solChange,
-                        usdcChange: swapResult.usdcChange,
-                        txId: swapResult.txId
-                    });
+            
+            // Always add opening trade operation
+            console.log(formatInfo(`${icons.open} OPENING OPERATION: Starting new position operation`));
+            const openingOperation = executeOpeningTrade(sentiment)
+                .then(result => ({ type: 'open', result }));
+            tradeOperations.push(openingOperation);
+            
+            console.log(formatInfo(`${icons.running} Both operations running in parallel - this may take a moment...`));
+            
+            // Wait for all operations to complete and process results
+            const results = await Promise.all(tradeOperations);
+            
+            console.log(formatHeading("=== TRADING RESULTS ==="));
+            
+            // Process each completed operation
+            for (const { type, result } of results) {
+                if (!result) {
+                    console.log(formatWarning(`${type.toUpperCase()} OPERATION: No result returned`));
+                    continue;
+                }
+                
+                if (type === 'close' && result.swapResult) {
+                    // Process closing trade
+                    swapResult = result.swapResult;
+                    orderBook.closeTrade(result.closedTradeId, swapResult.price);
+                    console.log(formatSuccess(`${icons.close} CLOSING OPERATION: Successfully closed trade ID: ${result.closedTradeId.substring(0, 12)}...`));
                     
-                    // Add trade to orderbook
-                    orderBook.addTrade(
-                        swapResult.price, 
-                        swapResult.solChange, 
-                        swapResult.usdcChange, 
-                        swapResult.txId
-                    );
+                    // Update position from closing trade
+                    const closedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                    if (closedTrade) {
+                        addRecentTrade(closedTrade);
+                        console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${closedTrade.type} ${formatBalance(closedTrade.amount, baseToken.NAME)} at ${formatPrice(closedTrade.price)}`);
+                        recentTrade = closedTrade;
+                    }
+                    
+                    txId = swapResult.txId;
                 }
-                
-                // Update position from swap
-                recentTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
-                if (recentTrade) {
-                    addRecentTrade(recentTrade);
-                    console.log(`${getTimestamp()}: ${recentTrade.type} ${recentTrade.amount.toFixed(6)} SOL at $${recentTrade.price.toFixed(2)}`);
+                else if (type === 'open') {
+                    if (result !== 'cooldownfail' && result !== 'fgichangefail') {
+                        // Process opening trade
+                        swapResult = result;
+                        txId = result.txId; // Prioritize the opening trade ID
+                        
+                        // Add to orderbook
+                        orderBook.addTrade(
+                            swapResult.price, 
+                            swapResult.baseTokenChange, 
+                            swapResult.quoteTokenChange, 
+                            swapResult.txId
+                        );
+                        
+                        // Update position
+                        const openedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                        if (openedTrade) {
+                            addRecentTrade(openedTrade);
+                            console.log(formatSuccess(`${icons.open} OPENING OPERATION: Successfully opened new position`));
+                            console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${openedTrade.type} ${formatBalance(openedTrade.amount, baseToken.NAME)} at ${formatPrice(openedTrade.price)}`);
+                            recentTrade = openedTrade;
+                        }
+                    } 
+                    else if (result === 'cooldownfail' || result === 'fgichangefail') {
+                        console.log(formatWarning(`${icons.warning} OPENING OPERATION: Trade skipped due to cooldown or FGI change`));
+                    }
                 }
-        
-                // Update balances after trade
-                const updatedBalances = await updatePortfolioBalances(wallet, connection);
-                position.updateBalances(updatedBalances.solBalance, updatedBalances.usdcBalance);
             }
+            
+            // Update balances after all trading operations
+            console.log(formatInfo(`\n${icons.balance} Updating portfolio balances after trades...`));
+            const updatedBalances = await updatePortfolioBalances(wallet, connection);
+            position.updateBalances(updatedBalances.baseBalance, updatedBalances.quoteBalance);
         } else if (MONITOR_MODE) {
-            console.log("Monitor Mode: Data collected without trading.");
+            console.log(formatInfo(`${icons.info} Monitor Mode: Data collected without trading.`));
         }
 
         // Calculate and display enhanced statistics
@@ -635,13 +740,15 @@ async function main() {
         
         // Emit trading data for UI
         devLog('Emitting trading data with version:', getVersion());
+        devLog(tradingData);
         emitTradingData(tradingData);
 
         // Save state for persistence
         savePositionState(tradingData);
 
     } catch (error) {
-        console.error('Error during main execution:', error);
+        console.error(formatError(`Error during main execution: ${error.message}`));
+        console.error(error);
         cleanupProgressBar();
     } finally {
         // Schedule next execution if not cancelled
@@ -658,29 +765,38 @@ async function main() {
  */
 async function initialize() {
     try {
+        console.log(formatHeading("=== INITIALISING PULSESURFER ==="));
+        
         // Load environment and set global wallet/connection
+        console.log(formatInfo(`${icons.settings} Loading environment configuration...`));
         const env = await loadEnvironment();
         setWallet(env.wallet);
         setConnection(env.connection);
+        console.log(formatSuccess(`${icons.success} Environment loaded successfully`));
+        console.log(formatInfo(`${icons.network} Connected to ${env.connectionSource} RPC endpoint`));
         devLog(".env successfully applied");
 
         // Clear any pending timeouts
         clearTimeout(globalTimeoutId);
 
         // Start the web server
+        console.log(formatInfo(`${icons.network} Starting web server...`));
         await startServer();
+        console.log(formatSuccess(`${icons.success} Web server started successfully`));
 
         // Load saved state if available
+        console.log(formatInfo(`${icons.settings} Checking for saved state...`));
         const savedState = loadState();
         devLog("SaveState:", savedState ? "Found" : "Not found");
 
         if (savedState && savedState.position) {
+            console.log(formatSuccess(`${icons.success} Found saved state - resuming previous session`));
             devLog("Initializing from saved state...");
             
             // Initialize position from saved state
             position = new Position(
-                savedState.position.initialSolBalance,
-                savedState.position.initialUsdcBalance,
+                savedState.position.initialBaseBalance,
+                savedState.position.initialQuoteBalance,
                 savedState.position.initialPrice
             );
             
@@ -691,22 +807,31 @@ async function initialize() {
             setInitialData(savedState.tradingData);
             devLog("Position and initial data set from saved state");
         } else {
-            devLog("No saved state found. Starting fresh.");
+            console.log(formatInfo(`${icons.info} No saved state found - starting fresh`));
             await resetPosition();
             devLog("Position reset completed");
         }
 
         // Set monitor mode from settings
         MONITOR_MODE = getMonitorMode();
-        console.log("Monitor mode:", MONITOR_MODE ? "Enabled" : "Disabled");
+        console.log(formatInfo(`${icons.settings} Monitor mode: ${MONITOR_MODE ? styles.warning + 'Enabled' + colours.reset : styles.success + 'Disabled' + colours.reset}`));
 
+        // Get base token for initial price fetch
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
+        console.log(formatInfo(`${icons.trade} Trading pair: ${styles.important}${baseToken.NAME}/${quoteToken.NAME}${colours.reset}`));
+        
         // Fetch initial price data
-        await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
+        console.log(formatInfo(`${icons.price} Fetching initial price data...`));
+        await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
         
         // Start first trading cycle
+        console.log(formatSuccess(`${icons.success} Initialisation complete - starting first trading cycle`));
+        console.log(horizontalLine());
         await main();
     } catch (error) {
-        console.error("Failed to initialize PulseSurfer:", error);
+        console.error(formatError(`Failed to initialise PulseSurfer: ${error.message}`));
+        console.error(error);
         process.exit(1);
     }
 }
@@ -715,32 +840,43 @@ async function initialize() {
  * Resets the position and order book to start fresh
  */
 async function resetPosition() {
+    console.log(formatHeading("=== RESETTING POSITION ==="));
     devLog("Resetting position and orderBook...");
     
     try {
         // Get updated wallet and connection
         wallet = getWallet();
         connection = getConnection();
+        
+        // Get token configurations
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
 
         // Cancel any pending transactions
+        console.log(formatInfo(`${icons.warning} Cancelling any pending transactions...`));
         cancelPendingBundle();
 
         if (!wallet || !connection) {
-            throw new Error("Wallet or connection is not initialized in resetPosition");
+            throw new Error("Wallet or connection is not initialised in resetPosition");
         }
 
         // Get current balances and price
-        const { solBalance, usdcBalance } = await updatePortfolioBalances(wallet, connection);
-        const currentPrice = await fetchPrice(BASE_PRICE_URL, SOL.ADDRESS);
+        console.log(formatInfo(`${icons.balance} Fetching current balances...`));
+        const { baseBalance, quoteBalance } = await updatePortfolioBalances(wallet, connection);
+        console.log(formatInfo(`${icons.price} Fetching current price...`));
+        const currentPrice = await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
         
         // Create new position
-        position = new Position(solBalance, usdcBalance, currentPrice);
+        console.log(formatInfo(`${icons.settings} Creating new position...`));
+        position = new Position(baseBalance, quoteBalance, currentPrice);
         
         // Reset order book
+        console.log(formatInfo(`${icons.settings} Resetting order book...`));
         orderBook.trades = [];
         orderBook.saveTrades();
 
         // Get current fear & greed index
+        console.log(formatInfo(`${icons.sentiment} Fetching Fear & Greed Index...`));
         const fearGreedIndex = await fetchFearGreedIndex();
         
         // Create initial data for UI
@@ -749,42 +885,50 @@ async function resetPosition() {
             price: currentPrice,
             fearGreedIndex,
             sentiment: getSentiment(fearGreedIndex),
-            usdcBalance: position.usdcBalance,
-            solBalance: position.solBalance,
+            quoteBalance: position.quoteBalance,
+            baseBalance: position.baseBalance,
             portfolioValue: position.getCurrentValue(currentPrice),
             netChange: 0,
             averageEntryPrice: 0,
             averageSellPrice: 0,
-            initialSolPrice: currentPrice,
+            initialPrice: currentPrice,
             initialPortfolioValue: position.getCurrentValue(currentPrice),
-            initialSolBalance: solBalance,
-            initialUsdcBalance: usdcBalance,
-            startTime: Date.now()
+            initialBaseBalance: baseBalance,
+            initialQuoteBalance: quoteBalance,
+            startTime: Date.now(),
+            tokenInfo: {
+                baseToken: baseToken.NAME,
+                quoteToken: quoteToken.NAME,
+                baseTokenDecimals: baseToken.DECIMALS,
+                quoteTokenDecimals: quoteToken.DECIMALS
+            }
         };
 
         // Set initial data and emit to UI
+        console.log(formatInfo(`${icons.settings} Initialising UI data...`));
         setInitialData(initialData);
         emitTradingData({ ...initialData, version: getVersion() });
         clearRecentTrades();
 
         // Save initial state
+        console.log(formatInfo(`${icons.settings} Saving initial state...`));
         saveState({
             position: {
-                solBalance: position.solBalance,
-                usdcBalance: position.usdcBalance,
-                initialSolBalance: position.initialSolBalance,
-                initialUsdcBalance: position.initialUsdcBalance,
+                baseBalance: position.baseBalance,
+                quoteBalance: position.quoteBalance,
+                initialBaseBalance: position.initialBaseBalance,
+                initialQuoteBalance: position.initialQuoteBalance,
                 initialPrice: position.initialPrice,
                 initialValue: position.initialValue,
-                totalSolBought: position.totalSolBought,
-                totalUsdcSpent: position.totalUsdcSpent,
-                totalSolSold: position.totalSolSold,
-                totalUsdcReceived: position.totalUsdcReceived,
-                netSolTraded: position.netSolTraded,
+                totalBaseBought: position.totalBaseBought,
+                totalQuoteSpent: position.totalQuoteSpent,
+                totalBaseSold: position.totalBaseSold,
+                totalQuoteReceived: position.totalQuoteReceived,
+                netBaseTraded: position.netBaseTraded,
                 startTime: position.startTime,
                 totalCycles: position.totalCycles,
-                totalVolumeSol: position.totalVolumeSol,
-                totalVolumeUsdc: position.totalVolumeUsdc,
+                totalVolumeBase: position.totalVolumeBase,
+                totalVolumeQuote: position.totalVolumeQuote,
                 trades: []
             },
             tradingData: initialData,
@@ -792,9 +936,14 @@ async function resetPosition() {
             orderBook: orderBook.getState()
         });
         
+        console.log(formatSuccess(`${icons.success} Position reset complete`));
+        console.log(formatInfo(`${icons.balance} Initial balances: ${formatBalance(baseBalance, baseToken.NAME)} | ${formatBalance(quoteBalance, quoteToken.NAME)}`));
+        console.log(horizontalLine());
+        
         return initialData;
     } catch (error) {
-        console.error("Error resetting position:", error);
+        console.error(formatError(`Error resetting position: ${error.message}`));
+        console.error(error);
         throw error;
     }
 }
@@ -804,29 +953,46 @@ async function resetPosition() {
  * @param {Object} newParams - Updated parameters
  */
 function handleParameterUpdate(newParams) {
-    devLog('\n--- Parameter Update Received ---');
-    devLog('New parameters:');
-    devLog(JSON.stringify(newParams, null, 2));
+    console.log(formatHeading("=== PARAMETER UPDATE ==="));
+    console.log(formatInfo(`${icons.settings} Received new configuration parameters`));
 
     const updatedSettings = readSettings(); // Read the updated settings
 
+    // Check if token pair has changed
+    if (updatedSettings.TRADING_PAIR && newParams.TRADING_PAIR) {
+        const oldBaseToken = getBaseToken().NAME;
+        const oldQuoteToken = getQuoteToken().NAME;
+        const newBaseToken = newParams.TRADING_PAIR.BASE_TOKEN?.NAME;
+        const newQuoteToken = newParams.TRADING_PAIR.QUOTE_TOKEN?.NAME;
+        
+        if (newBaseToken && newQuoteToken && 
+            (oldBaseToken !== newBaseToken || oldQuoteToken !== newQuoteToken)) {
+            console.log(formatInfo(`${icons.trade} Token pair changed: ${oldBaseToken}/${oldQuoteToken} → ${newBaseToken}/${newQuoteToken}`));
+            
+            // Update orderBook to use new token-specific file
+            orderBook.updateStoragePathForTokens();
+            console.log(formatSuccess(`${icons.success} OrderBook updated for new token pair`));
+        }
+    }
+
     if (updatedSettings.SENTIMENT_BOUNDARIES) {
         SENTIMENT_BOUNDARIES = updatedSettings.SENTIMENT_BOUNDARIES;
-        devLog('Sentiment boundaries updated. New boundaries:', SENTIMENT_BOUNDARIES);
+        console.log(formatInfo(`${icons.sentiment} Sentiment boundaries updated`));
     }
     if (updatedSettings.SENTIMENT_MULTIPLIERS) {
         SENTIMENT_MULTIPLIERS = updatedSettings.SENTIMENT_MULTIPLIERS;
-        devLog('Sentiment multipliers updated. New multipliers:', SENTIMENT_MULTIPLIERS);
+        console.log(formatInfo(`${icons.sentiment} Sentiment multipliers updated`));
     }
 
-    devLog('Trading strategy will adjust in the next cycle.');
-    devLog('----------------------------------\n');
+    console.log(formatInfo(`${icons.info} Trading strategy will adjust in the next cycle`));
+    console.log(horizontalLine());
 }
 
 /**
  * Handles restart trading event
  */
 async function handleRestartTrading() {
+    console.log(formatHeading("=== RESTARTING TRADING ==="));
     devLog("Restarting trading...");
     
     try {
@@ -835,23 +1001,28 @@ async function handleRestartTrading() {
         connection = getConnection();
 
         // Cancel any pending transactions
+        console.log(formatInfo(`${icons.warning} Cancelling pending transactions...`));
         cancelPendingBundle();
 
         // Signal the current execution to stop
+        console.log(formatInfo(`${icons.warning} Stopping current execution...`));
         isCurrentExecutionCancelled = true;
 
         // Clear any existing scheduled runs
+        console.log(formatInfo(`${icons.warning} Clearing scheduled cycles...`));
         clearTimeout(globalTimeoutId);
 
         // Stop the progress bar if it's running
         cleanupProgressBar();
 
         // Wait for current operations to complete
+        console.log(formatInfo(`${icons.wait} Waiting for operations to complete...`));
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Reset position and get ready for new trading
+        console.log(formatInfo(`${icons.settings} Resetting position...`));
         await resetPosition(wallet, connection);
-        devLog("Position reset. Waiting for next scheduled interval to start trading...");
+        console.log(formatSuccess(`${icons.success} Position reset complete`));
 
         // Reset the cancellation flag
         isCurrentExecutionCancelled = false;
@@ -860,7 +1031,7 @@ async function handleRestartTrading() {
         const waitTime = getWaitTime();
         const nextExecutionTime = new Date(Date.now() + waitTime);
 
-        console.log(`Next trading cycle will start at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`);
+        console.log(formatInfo(`${icons.time} Next trading cycle will start at ${nextExecutionTime.toLocaleTimeString()} (in ${formatTime(waitTime)})`));
 
         // Set up a progress bar for the wait time
         const totalSeconds = Math.ceil(waitTime / 1000);
@@ -877,12 +1048,16 @@ async function handleRestartTrading() {
             devLog("Starting new trading cycle.");
             main();
         }, waitTime);
+        
+        console.log(formatSuccess(`${icons.success} Trading restart initiated successfully`));
+        console.log(horizontalLine());
     } catch (error) {
-        console.error("Error handling restart trading:", error);
+        console.error(formatError(`Error handling restart trading: ${error.message}`));
+        console.error(error);
         
         // Wait until next expected cycle rather than using a fixed delay
         const waitTime = getWaitTime();
-        console.log(`Error occurred. Waiting until next expected cycle in ${formatTime(waitTime)}`);
+        console.log(formatWarning(`${icons.warning} Error occurred. Waiting until next expected cycle in ${formatTime(waitTime)}`));
         setTimeout(() => {
             main();
         }, waitTime);
@@ -896,10 +1071,11 @@ paramUpdateEmitter.on('restartTrading', handleRestartTrading);
 // Self-executing initialization function
 (async function () {
     try {
-        console.log("Starting PulseSurfer...");
+        console.log(formatHeading("=== STARTING PULSESURFER ==="));
+        console.log(formatInfo(`${icons.info} Version: ${styles.important}${getVersion()}${colours.reset}`));
         await initialize();
     } catch (error) {
-        console.error("Failed to initialize PulseSurfer:", error);
+        console.error(formatError(`Failed to initialise PulseSurfer: ${error.message}`));
         process.exit(1);
     }
 })();

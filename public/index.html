@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SolSurfer Trading Bot</title>
+    <title>PulseSurfer Trading Bot</title>
     <link rel="icon" href="/surfsolana_icon.svg" type="image/svg+xml">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
@@ -12,7 +12,7 @@
 
 <body class="pulse-theme">
     <div id="loginForm" style="display: none;">
-        <h1>SolSurfer</h1>
+        <h1>PulseSurfer</h1>
         <h2>Login</h2>
         <input type="password" id="passwordInput" placeholder="Enter password">
         <button onclick="login()">Login</button>
@@ -20,15 +20,17 @@
 
     <div id="mainContent" style="display: none;">
         <div class="container">
-            <h1>> Solsurfer Fear and Greed Trader</h1>
-            <p>> By SurfSolana Team</p>
+            <h1>> PulseSurfer Fear and Greed Trader</h1>
+            <h2 id="tokenPairTitle"></h2>
+            <p>> By SurfSolana</p>
 
             <!-- Chart & F&G Section -->
             <div class="chart-section">
                 <div class="chart-container">
                     <iframe
-                        src="https://birdeye.so/tv-widget/So11111111111111111111111111111111111111112?chain=solana&viewMode=pair&chartInterval=15&chartType=AREA&chartTimezone=Europe%2FLondon&chartLeftToolbar=hide&theme=dark&chartOverrides=mainSeriesProperties.areaStyle.linecolor%3A%239945ff"
-                        allowfullscreen></iframe>
+    id="tokenChart"
+    src="https://birdeye.so/tv-widget/So11111111111111111111111111111111111111112?chain=solana&viewMode=pair&chartInterval=15&chartType=AREA&chartTimezone=Europe%2FLondon&chartLeftToolbar=hide&theme=dark&chartOverrides=mainSeriesProperties.areaStyle.linecolor%3A%239945ff"
+    allowfullscreen></iframe>
                 </div>
                 <div class="chart-sidebar">
                     <div class="fgi-display">

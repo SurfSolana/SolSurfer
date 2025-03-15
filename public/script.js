@@ -16,27 +16,34 @@ const fgiGaugeElement = document.getElementById('fgiGauge');
 const fgiPointerElement = document.getElementById('fgiPointer');
 const tradeListElement = document.getElementById('tradeList');
 
-const tooltipDefinitions = {
-    'Portfolio Value': "Current total value of all assets in your trading portfolio",
-    'Portfolio Total Change': "Net percentage change in portfolio value since trading began",
-    'SOL Price': "Current market price of SOL token",
-    'Solana Market Change': "Percentage change in SOL price since bot started trading",
-    'Portfolio Weighting': "Current balance distribution between SOL and USDC as percentages",
-    'SOL Balance': "Available SOL tokens in your trading wallet",
-    'USDC Balance': "Available USDC tokens in your trading wallet", 
-    'Average Entry Price': "Average price paid when buying SOL",
-    'Average Sell Price': "Average price received when selling SOL",
-    'Program Run Time (Hours/Mins/Seconds)': "Total time elapsed since trading began",
-    'Estimated APY (Compared to Holding 100% SOL)': "Estimated annual return compared to holding 100% SOL, includes trading fees and costs",
-    'Win Rate': "Percentage of closed trades that resulted in profit",
-    'Total Trades': "Total number of trades executed since trading began",
-    'Open Positions': "Number of currently active trades that haven't been closed",
-    'Closed Trades': "Number of completed trades that have been fully settled",
-    'Total PnL': "Total realized profit or loss from all closed trades",
-    'Unrealized PnL': "Current estimated profit or loss of open positions based on current market price",
-    'Total Volume': "Total value of all trades executed in USD",
-    'Avg Trade Size': "Average dollar value of individual trades"
-};
+// Initialize tooltipDefinitions as an empty object
+let tooltipDefinitions = {};
+
+function createTooltipDefinitions(baseTokenName, quoteTokenName) {
+    return {
+        'Portfolio Value': "Current total value of all assets in your trading portfolio",
+        'Portfolio Total Change': "Net percentage change in portfolio value since trading began",
+        [`${baseTokenName} Price`]: `Current market price of ${baseTokenName} token`,
+        [`${baseTokenName} Market Change`]: `Percentage change in ${baseTokenName} price since bot started trading`,
+        'Portfolio Weighting': `Current balance distribution between ${baseTokenName} and ${quoteTokenName} as percentages`,
+        [`${baseTokenName} Balance`]: `Available ${baseTokenName} tokens in your trading wallet`,
+        [`${quoteTokenName} Balance`]: `Available ${quoteTokenName} tokens in your trading wallet`,
+        'Average Entry Price': `Average price paid when buying ${baseTokenName}`,
+        'Average Sell Price': `Average price received when selling ${baseTokenName}`,
+        'Program Run Time (Hours/Mins/Seconds)': "Total time elapsed since trading began",
+        [`Estimated APY (Compared to Holding 100% ${baseTokenName})`]: `Estimated annual return compared to holding 100% ${baseTokenName}, includes trading fees and costs`,
+        'Win Rate': "Percentage of closed trades that resulted in profit",
+        'Total Trades': "Total number of trades executed since trading began",
+        'Open Positions': "Number of currently active trades that haven't been closed",
+        'Closed Trades': "Number of completed trades that have been fully settled",
+        'Total PnL': "Total realized profit or loss from all closed trades",
+        'Unrealized PnL': "Current estimated profit or loss of open positions based on current market price",
+        'Total Volume': "Total value of all trades executed in USD",
+        'Avg Trade Size': "Average dollar value of individual trades"
+    };
+}
+
+
 
 let sentimentBoundaries = {
     EXTREME_FEAR: 20,
@@ -45,10 +52,15 @@ let sentimentBoundaries = {
     EXTREME_GREED: 80
 };
 
+
+let currentBaseTokenAddress
 let serverName = null;
 let priceUnit = 'usd';
 let lastTradingData;
 export let isLocked = true;
+let baseTokenName
+let quoteTokenName
+let currentTimeframe = '15m'; // Default timeframe
 
 function showLoginForm() {
     document.getElementById('loginForm').style.display = 'block';
@@ -123,10 +135,73 @@ function authenticatedFetch(url, options = {}) {
         });
 }
 
+function handleTokenInfo(tokenInfo) {
+    if (tokenInfo && tokenInfo.baseTokenAddress) {
+        updateChartTokenAddress(tokenInfo.baseTokenAddress);
+    }
+}
+
+function updateChartTokenAddress(baseTokenAddress) {
+    if (!baseTokenAddress) {
+      console.error("Missing base token address for chart update");
+      return;
+    }
+    
+    // Get the iframe element
+    const chartIframe = document.getElementById('tokenChart');
+    if (!chartIframe) {
+      console.error("Chart iframe not found");
+      return;
+    }
+    
+    try {
+      // Save the current src
+      const currentSrc = chartIframe.src;
+      
+      // Create a new URL using the token address
+      const baseChartUrl = "https://birdeye.so/tv-widget/";
+      const chartParams = "?chain=solana&viewMode=pair&chartInterval=15&chartType=AREA&chartTimezone=Europe%2FLondon&chartLeftToolbar=hide&theme=dark&chartOverrides=mainSeriesProperties.areaStyle.linecolor%3A%239945ff";
+      const newSrc = `${baseChartUrl}${baseTokenAddress}${chartParams}`;
+      
+      // Only update if different
+      if (newSrc !== currentSrc) {
+        console.log(`Updating chart from ${currentBaseTokenAddress} to: ${baseTokenAddress}`);
+        
+        // Add event listeners to detect load errors
+        chartIframe.onerror = () => {
+          console.error(`Failed to load chart for token: ${baseTokenAddress}`);
+          // Optionally show a user-visible error message
+        };
+        
+        chartIframe.src = newSrc;
+        currentBaseTokenAddress = baseTokenAddress;
+      }
+    } catch (error) {
+      console.error(`Error updating chart for token ${baseTokenAddress}:`, error);
+    }
+  }
+
 function updateTradingData(data) {
     lastTradingData = data;
     const priceLabel = '$';
-    const price = data?.price?.usd
+    const price = data?.price?.usd;
+    
+    // Get token names from the data
+    baseTokenName = data?.tokenInfo?.baseToken;
+    quoteTokenName = data?.tokenInfo?.quoteToken;
+    
+    // Get timeframe from the data if available
+    if (data?.params?.FGI_TIMEFRAME) {
+        currentTimeframe = data.params.FGI_TIMEFRAME;
+    }
+
+    // Update token pair in the title with timeframe
+    const tokenPairTitle = document.getElementById('tokenPairTitle');
+    if (tokenPairTitle && baseTokenName && quoteTokenName) {
+        tokenPairTitle.textContent = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe})`;
+    }
+
+    tooltipDefinitions = createTooltipDefinitions(baseTokenName, quoteTokenName);
 
     timestampElement.textContent = data?.timestamp || 'Please Wait';
 
@@ -153,15 +228,17 @@ function updateTradingData(data) {
         dataPoints.push(
             { label: "Portfolio Value", value: formatValue(data.portfolioValue?.[priceUnit], priceLabel), icon: "fa-solid fa-wallet" },
             { label: "Portfolio Total Change", value: formatValue(data.portfolioTotalChange, '', '%'), icon: "fa-solid fa-percentage" },
-            { label: "SOL Price", value: formatValue(price, priceLabel), icon: "fa-solid fa-coins" },
-            { label: "Solana Market Change", value: formatValue(data.solanaMarketChange, '', '%'), icon: "fa-solid fa-percentage" },
-            { label: "Portfolio Weighting", value: data.portfolioWeighting ? `${data.portfolioWeighting.usdc}% USDC, ${data.portfolioWeighting.sol}% SOL` : 'Please Wait', icon: "fa-solid fa-chart-pie", fullWidth: true },
-            { label: "SOL Balance", value: formatValue(data.solBalance, '', ' SOL'), icon: "fa-solid fa-coins" },
-            { label: "USDC Balance", value: formatValue(data.usdcBalance, '', ' USDC'), icon: "fa-solid fa-credit-card" },
+            { label: `${baseTokenName} Price`, value: formatValue(price, priceLabel), icon: "fa-solid fa-coins" },
+            { label: `${baseTokenName} Market Change`, value: formatValue(data.tokenMarketChange || data.solanaMarketChange, '', '%'), icon: "fa-solid fa-percentage" },
+            { label: "Portfolio Weighting", value: data.portfolioWeighting ? 
+              `${data.portfolioWeighting.quoteToken || data.portfolioWeighting.usdc}% ${quoteTokenName}, ${data.portfolioWeighting.baseToken || data.portfolioWeighting.sol}% ${baseTokenName}` : 
+              'Please Wait', icon: "fa-solid fa-chart-pie", fullWidth: true },
+            { label: `${baseTokenName} Balance`, value: formatValue(data.baseTokenBalance || data.solBalance, '', ` ${baseTokenName}`), icon: "fa-solid fa-coins" },
+            { label: `${quoteTokenName} Balance`, value: formatValue(data.quoteTokenBalance || data.usdcBalance, '', ` ${quoteTokenName}`), icon: "fa-solid fa-credit-card" },
             { label: "Average Entry Price", value: formatValue(data.averageEntryPrice?.[priceUnit], priceLabel), icon: "fa-solid fa-sign-in-alt" },
             { label: "Average Sell Price", value: formatValue(data.averageSellPrice?.[priceUnit], priceLabel), icon: "fa-solid fa-sign-out-alt" },
             { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
-            { label: "Estimated APY (Compared to Holding 100% SOL)", value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
+            { label: `Estimated APY (Compared to Holding 100% ${baseTokenName})`, value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
         );
     }
 
@@ -191,7 +268,7 @@ function updateTradingData(data) {
         unrealizedPnlElement.className = `data-value ${data.orderbook.totalUnrealizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
 
         if (data.orderbook.trades) {
-            updateOrderbookTable(data.orderbook.trades);
+            updateOrderbookTable(data.orderbook.trades, baseTokenName);
         }
     }
 
@@ -221,7 +298,7 @@ function updateTradingData(data) {
     }
 }
 
-function updateOrderbookTable(trades) {
+function updateOrderbookTable(trades, baseTokenName) {
     const tbody = document.getElementById('orderbookBody');
     if (!tbody) return;
 
@@ -233,7 +310,12 @@ function updateOrderbookTable(trades) {
 
     const limitedTrades = sortedTrades.slice(0, 20);
 
-    tbody.innerHTML = limitedTrades.map(trade => `
+    tbody.innerHTML = limitedTrades.map(trade => {
+        // Get the token amount field name (either baseTokenAmount or solAmount for backward compatibility)
+        const amountField = trade.baseTokenAmount !== undefined ? 'baseTokenAmount' : 'solAmount';
+        const valueField = trade.quoteTokenValue !== undefined ? 'quoteTokenValue' : 'value';
+        
+        return `
         <tr>
             <td>${trade.timestamp}</td>
             <td>
@@ -247,8 +329,8 @@ function updateOrderbookTable(trades) {
                 </span>
             </td>
             <td>$${trade.price.toFixed(2)}</td>
-            <td>${trade.solAmount.toFixed(6)} SOL</td>
-            <td>$${trade.value.toFixed(2)}</td>
+            <td>${trade[amountField].toFixed(6)} ${baseTokenName}</td>
+            <td>$${trade[valueField].toFixed(2)}</td>
             <td class="${trade.status === 'open' ? 
                 (trade.upnl >= 0 ? 'pnl-positive' : 'pnl-negative') : 
                 (trade.realizedPnl >= 0 ? 'pnl-positive' : 'pnl-negative')}">
@@ -258,7 +340,7 @@ function updateOrderbookTable(trades) {
             </td>
             <td>${trade.closePrice ? `$${trade.closePrice.toFixed(2)}` : '-'}</td>
         </tr>
-    `).join('') || '<tr><td colspan="8" class="empty-state">No trades found</td></tr>';
+    `}).join('') || `<tr><td colspan="8" class="empty-state">No ${baseTokenName} trades found</td></tr>`;
 }
 
 function updateFGI(value) {
@@ -305,6 +387,17 @@ function updateFormValues(params) {
     createFearGreedChart(params);
     initializeLockButton();
     initializeSlider(params, isLocked);
+    
+    // Update timeframe from settings
+    if (params.FGI_TIMEFRAME) {
+        currentTimeframe = params.FGI_TIMEFRAME;
+        
+        // Update token pair title with timeframe
+        const tokenPairTitle = document.getElementById('tokenPairTitle');
+        if (tokenPairTitle && baseTokenName && quoteTokenName) {
+            tokenPairTitle.textContent = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe})`;
+        }
+    }
 }
 
 function updateTradeList(trades) {
@@ -362,7 +455,7 @@ function addTrade(trade) {
         const action = trade.type;
         const amount = parseFloat(trade.amount).toFixed(6);
         const price = parseFloat(trade.price).toFixed(2);
-        const unit = 'SOL';
+        const unit = `${baseTokenName}`;
         tradeContent = `${formattedDate}: ${action} ${amount} ${unit} at $${price}`;
         tradeItem.classList.add(action.toLowerCase() === 'bought' ? 'trade-buy' : 'trade-sell');
     }
@@ -431,16 +524,38 @@ socket.on('serverIdentification', (serverInfo) => {
     console.log('Connected to server:', serverInfo);
     serverName = serverInfo.name;
 
-    document.title = `${serverName} v${serverInfo.version}`;
-    const headerElement = document.querySelector('#botTitle');
-    if (headerElement) {
-        headerElement.textContent = `> ${serverName} Fear and Greed Trader`;
+    // Update the document title with token pair
+    const baseToken = serverInfo.tokenInfo?.baseToken || '';
+    const quoteToken = serverInfo.tokenInfo?.quoteToken || '';
+    
+    // Get timeframe if available
+    if (serverInfo.params && serverInfo.params.FGI_TIMEFRAME) {
+        currentTimeframe = serverInfo.params.FGI_TIMEFRAME;
     }
+    
+    document.title = `${serverName} v${serverInfo.version} (${baseToken}/${quoteToken} ${currentTimeframe})`;
+    
+    const headerElement = document.querySelector('h1');
+    if (headerElement) {
+        headerElement.textContent = `> PulseSurfer Fear and Greed Trader`;
+    }
+    
+    // Set token pair in subtitle with timeframe
+    const tokenPairTitle = document.getElementById('tokenPairTitle');
+    if (tokenPairTitle && baseToken && quoteToken) {
+        tokenPairTitle.textContent = `> ${baseToken}/${quoteToken} (${currentTimeframe})`;
+    }
+    
     document.body.className = 'pulse-theme';
 
     const versionElement = document.getElementById('versionNumber');
     if (versionElement) {
-        versionElement.textContent = `Pulse v${serverInfo.version}`;
+        versionElement.textContent = `${serverName} v${serverInfo.version} (${baseToken}/${quoteToken} ${currentTimeframe})`;
+    }
+    
+    // Extract token info if available
+    if (serverInfo.tokenInfo) {
+        handleTokenInfo(serverInfo.tokenInfo);
     }
 });
 
@@ -451,8 +566,28 @@ socket.on('disconnect', () => {
 
 socket.on('tradingUpdate', (data) => {
     updateTradingData(data);
-    console.log('Client received trading update with version:', data.version);
-    console.log('Received trading update:', data);
+    
+    // Extract token info and update chart
+    if (data.tokenInfo) {
+        handleTokenInfo(data.tokenInfo);
+    }
+    
+    // Get timeframe if available
+    if (data.params && data.params.FGI_TIMEFRAME && data.params.FGI_TIMEFRAME !== currentTimeframe) {
+        currentTimeframe = data.params.FGI_TIMEFRAME;
+        
+        // Update token pair title with new timeframe
+        const tokenPairTitle = document.getElementById('tokenPairTitle');
+        if (tokenPairTitle && baseTokenName && quoteTokenName) {
+            tokenPairTitle.textContent = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe})`;
+        }
+        
+        // Update version display
+        const versionElement = document.getElementById('versionNumber');
+        if (versionElement && serverName) {
+            versionElement.textContent = `${serverName} v${data.version || 'unknown'} (${baseTokenName}/${quoteTokenName} ${currentTimeframe})`;
+        }
+    }
 
     if (data.recentTrades && data.recentTrades.length > 0) {
         const mostRecentTrade = data.recentTrades[0];
@@ -476,6 +611,28 @@ socket.on('tradingUpdate', (data) => {
     } else {
         console.log('No recent trades in the update');
     }
+});
+
+socket.on('paramsUpdated', (params) => {
+    // Check if timeframe changed
+    if (params.FGI_TIMEFRAME && params.FGI_TIMEFRAME !== currentTimeframe) {
+        currentTimeframe = params.FGI_TIMEFRAME;
+        
+        // Update token pair title with new timeframe
+        const tokenPairTitle = document.getElementById('tokenPairTitle');
+        if (tokenPairTitle && baseTokenName && quoteTokenName) {
+            tokenPairTitle.textContent = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe})`;
+        }
+        
+        // Update version display
+        const versionElement = document.getElementById('versionNumber');
+        if (versionElement && serverName) {
+            versionElement.textContent = `${serverName} v${lastTradingData?.version || 'unknown'} (${baseTokenName}/${quoteTokenName} ${currentTimeframe})`;
+        }
+    }
+    
+    // Update form values
+    updateFormValues(params);
 });
 
 export function updateParams(e, sliderBoundaries) {

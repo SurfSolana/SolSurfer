@@ -329,7 +329,7 @@ function updateOrderbookTable(trades, baseTokenName) {
                 </span>
             </td>
             <td>$${trade.price.toFixed(2)}</td>
-            <td>${trade[amountField].toFixed(6)} ${baseTokenName}</td>
+            <td>${trade[amountField].toFixed(9)} ${baseTokenName}</td>
             <td>$${trade[valueField].toFixed(2)}</td>
             <td class="${trade.status === 'open' ? 
                 (trade.upnl >= 0 ? 'pnl-positive' : 'pnl-negative') : 
@@ -453,7 +453,7 @@ function addTrade(trade) {
         tradeItem.classList.add('trade-failed');
     } else {
         const action = trade.type;
-        const amount = parseFloat(trade.amount).toFixed(6);
+        const amount = parseFloat(trade.amount).toFixed(9);
         const price = parseFloat(trade.price).toFixed(2);
         const unit = `${baseTokenName}`;
         tradeContent = `${formattedDate}: ${action} ${amount} ${unit} at $${price}`;

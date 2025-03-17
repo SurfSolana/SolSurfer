@@ -202,7 +202,7 @@ async function getQuote(inputMint, outputMint, tradeAmountLamports) {
     
     // Calculate fees
     const developerTipPercentage = settings.DEVELOPER_TIP_PERCENTAGE || 0;
-    const totalFeePercentage = 0.05 + developerTipPercentage;
+    const totalFeePercentage = 0.01 + developerTipPercentage; // Changed from 0.05 to 0.01
     const platformFeeBps = Math.round(totalFeePercentage * 100);
     
     // Get token info for logging

@@ -798,9 +798,11 @@ function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
  * @param {string} outputMint - Output token mint
  * @param {number} exactOutAmount - Exact output amount
  * @param {string} inputMint - Input token mint
+ * @param {Object} trade - Trade object being closed (optional)
+ * @param {number} currentPrice - Current token price (optional)
  * @returns {Promise<Object|null>} Swap result or null on failure
  */
-async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint) {
+async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint, trade = null, currentPrice = null) {
     try {
         devLog("Initiating exact out swap");
         const baseToken = getBaseToken();
@@ -823,13 +825,50 @@ async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint
             decimals: decimals
         });
 
+        // Calculate profit-based fee if this is closing a trade
+        let profitFeeBps = 0;
+        if (trade && trade.price && currentPrice !== null) {
+            // Calculate profit based on trade direction
+            const profit = trade.direction === 'buy' ? 
+                (currentPrice - trade.price) * trade.baseTokenAmount :
+                (trade.price - currentPrice) * trade.baseTokenAmount;
+            
+            devLog(`Trade direction: ${trade.direction}, Entry price: ${trade.price}, Current price: ${currentPrice}`);
+            devLog(`Base token amount: ${trade.baseTokenAmount}, Calculated profit: ${profit}`);
+            
+            // Only apply profit fee if positive
+            if (profit > 0) {
+                // Calculate 10% of profit as the fee
+                const profitFee = profit * 0.1;
+                
+                // Calculate the total swap value in quote token
+                const isOutputBase = outputMint === baseToken.ADDRESS;
+                const exactOutAmountDecimal = exactOutAmount / (10 ** (isOutputBase ? baseToken.DECIMALS : quoteToken.DECIMALS));
+                const swapValueInQuote = isOutputBase ? exactOutAmountDecimal * currentPrice : exactOutAmountDecimal;
+                
+                // Calculate fee as basis points of swap value
+                profitFeeBps = Math.round((profitFee / swapValueInQuote) * 10000);
+                
+                devLog(`Profit: ${profit}, Fee: ${profitFee}, Swap Value in Quote: ${swapValueInQuote}, Fee BPS: ${profitFeeBps}`);
+                
+                // Ensure fee doesn't exceed a reasonable limit
+                if (profitFeeBps > 1000) {
+                    devLog(`Profit fee BPS capped from ${profitFeeBps} to 1000`);
+                    profitFeeBps = 1000;
+                }
+            }
+        }
+
+        // Combine fixed fee (1 bps) with profit-based fee
+        const totalFeeBps = 1 + profitFeeBps; // 1 bps fixed fee + profit-based fee
+        
         // Build params for Jupiter API
         const params = new URLSearchParams({
             inputMint: inputMint,
             outputMint: outputMint,
             amount: exactOutAmountFloor.toString(),
             slippageBps: '50',
-            platformFeeBps: '0',
+            platformFeeBps: totalFeeBps.toString(), // Updated fee structure
             onlyDirectRoutes: 'false',
             asLegacyTransaction: 'false',
             swapMode: 'ExactOut'
@@ -879,7 +918,8 @@ async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint
             outputToken: outputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME,
             inputAmount: inputAmount.toFixed(6),
             outputAmount: outputAmount.toFixed(6),
-            jitoStatus: 'Success'
+            jitoStatus: 'Success',
+            feeInBps: totalFeeBps // Log the fee rate applied
         });
 
         // Calculate changes in base and quote token amounts
@@ -888,11 +928,16 @@ async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint
         const price = Math.abs(quoteTokenChange / baseTokenChange);
 
         console.log(formatSuccess(`${icons.success} Trade Successful!`));
+        if (profitFeeBps > 0) {
+            console.log(formatInfo(`${icons.profit} Profit fee applied: ${profitFeeBps} bps (10% of profit)`));
+        }
+        
         return {
             txId: jitoBundleResult.swapTxSignature,
             price,
             baseTokenChange,
             quoteTokenChange,
+            appliedFeeBps: totalFeeBps,
             ...jitoBundleResult
         };
 

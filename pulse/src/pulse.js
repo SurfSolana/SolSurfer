@@ -250,16 +250,37 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
             console.log(`  ${formatBalance(oldestMatchingTrade.baseTokenAmount, baseToken.NAME)} @ ${formatPrice(currentPrice)}`);
             console.log(`  Quote value: ${formatBalance(oldestMatchingTrade.quoteTokenValue, quoteToken.NAME)}`);
             
-            // Execute the swap to close the position
+            // Calculate potential profit
+            const potentialProfit = isClosingBuy ? 
+                (oldestMatchingTrade.price - currentPrice) * oldestMatchingTrade.baseTokenAmount :
+                (currentPrice - oldestMatchingTrade.price) * oldestMatchingTrade.baseTokenAmount;
+                
+            if (potentialProfit > 0) {
+                console.log(`  ${styles.positive}Potential Profit: ${formatPrice(potentialProfit)}${colours.reset}`);
+                console.log(`  ${styles.info}10% Fee: ${formatPrice(potentialProfit * 0.1)}${colours.reset}`);
+            }
+            
+            // Execute the swap to close the position - now passing trade and currentPrice
             const swapResult = await executeExactOutSwap(
                 wallet,
                 isClosingBuy ? baseToken.ADDRESS : quoteToken.ADDRESS,
                 exactOutAmount,
-                isClosingBuy ? quoteToken.ADDRESS : baseToken.ADDRESS
+                isClosingBuy ? quoteToken.ADDRESS : baseToken.ADDRESS,
+                oldestMatchingTrade, // Pass the trade object
+                currentPrice          // Pass the current price
             );
 
             if (swapResult) {
                 console.log(formatSuccess(`${icons.success} CLOSING: Swap executed successfully`));
+                
+                // Log fee information if it was applied
+                if (swapResult.appliedFeeBps > 1) {
+                    const profitFeeBps = swapResult.appliedFeeBps - 1; // Subtract the 1bps base fee
+                    if (profitFeeBps > 0) {
+                        console.log(formatInfo(`${icons.profit} Applied profit fee: ${profitFeeBps} bps (10% of realized profit)`));
+                    }
+                }
+                
                 return {
                     swapResult,
                     closedTradeId: oldestMatchingTrade.id

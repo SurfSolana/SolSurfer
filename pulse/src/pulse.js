@@ -391,10 +391,16 @@ async function executeClosingTrade(sentiment) {
     
     while (attempt <= MAX_TRADE_ATTEMPTS && !isCurrentExecutionCancelled) {
         try {
-            console.log(formatInfo(`${icons.close} CLOSING: Attempt ${attempt}/${MAX_TRADE_ATTEMPTS}`));
-            const closingResult = await checkAndCloseOpposingTrade(sentiment, currentPrice);
+            // Fetch the latest price before each attempt
+            const latestPrice = await fetchPrice(BASE_PRICE_URL, getBaseToken().ADDRESS);
+            console.log(formatInfo(`${icons.close} CLOSING: Attempt ${attempt}/${MAX_TRADE_ATTEMPTS} with price ${formatPrice(latestPrice)}`));
+            
+            // Use the fresh price for trade evaluation and execution
+            const closingResult = await checkAndCloseOpposingTrade(sentiment, latestPrice);
             
             if (closingResult) {
+                // Update global price state with the latest value
+                currentPrice = latestPrice;
                 return closingResult;
             }
         } catch (error) {

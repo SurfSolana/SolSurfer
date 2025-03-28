@@ -14,8 +14,8 @@ This guide will help you set up Discord notifications for your SolSurfer trading
 3. Go to "Integrations"
 4. Click on "Webhooks"
 5. Click "New Webhook"
-6. Give your webhook a name (e.g., "SolSurfer Bot")
-7. Optionally, customize the avatar
+6. Name your webhook "Surfs Up 🏄" (or any name you prefer)
+7. You can also upload a surfing-related image as the avatar
 8. Click "Copy Webhook URL" to copy the webhook URL to your clipboard
 9. Click "Save"
 
@@ -34,7 +34,7 @@ This guide will help you set up Discord notifications for your SolSurfer trading
 ### Step 3: Restart SolSurfer
 
 1. Restart your SolSurfer bot
-2. You should receive a startup notification in your Discord channel
+2. You should receive a startup notification in your Discord channel from "Surfs Up 🏄"
 3. After 24 hours, you'll receive your first daily report
 
 ## Notification Types

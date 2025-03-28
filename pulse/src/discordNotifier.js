@@ -146,7 +146,7 @@ function createDailyStatsMessage(stats) {
     // Create Discord embed
     return {
         embeds: [{
-            title: "📊 SolSurfer Daily Report",
+            title: "📊 Surfs Up 🏄 Daily Report",
             color: stats.netChange >= 0 ? 5025616 : 15684432, // Green for profit, red for loss
             timestamp: new Date().toISOString(),
             fields: [
@@ -204,7 +204,7 @@ function createStartupMessage() {
     
     return {
         embeds: [{
-            title: "🚀 SolSurfer Bot Started",
+            title: "🚀 Surfs Up 🏄 Bot Started",
             color: 45015, // Blue
             timestamp: new Date().toISOString(),
             fields: [

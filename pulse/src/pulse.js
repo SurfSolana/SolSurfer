@@ -73,6 +73,7 @@ const {
     getWallet, 
     getConnection 
 } = require('./globalState');
+const { processDailyNotification, sendStartupNotification } = require('./discordNotifier');
 const cliProgress = require('cli-progress');
 
 // Global state management
@@ -772,6 +773,14 @@ async function main() {
 
         // Save state for persistence
         savePositionState(tradingData);
+        
+        // Process daily Discord notification if enabled
+        if (settings?.NOTIFICATIONS_ENABLED) {
+            const notificationSent = await processDailyNotification(position, currentPrice);
+            if (notificationSent) {
+                console.log(formatSuccess(`${icons.success} Daily Discord notification sent successfully`));
+            }
+        }
 
     } catch (error) {
         console.error(formatError(`Error during main execution: ${error.message}`));
@@ -851,6 +860,15 @@ async function initialize() {
         // Fetch initial price data
         console.log(formatInfo(`${icons.price} Fetching initial price data...`));
         await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
+        
+        // Send startup notification to Discord if configured
+        console.log(formatInfo(`${icons.network} Sending startup notification...`));
+        const notificationSent = await sendStartupNotification();
+        if (notificationSent) {
+            console.log(formatSuccess(`${icons.success} Discord startup notification sent successfully`));
+        } else {
+            console.log(formatInfo(`${icons.info} Discord notifications not configured or failed to send`));
+        }
         
         // Start first trading cycle
         console.log(formatSuccess(`${icons.success} Initialisation complete - starting first trading cycle`));

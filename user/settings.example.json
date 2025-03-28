@@ -1,23 +1,39 @@
 {
-  "VERSION": "2.6.1",
+  "VERSION": "3.1",
+  "TRADING_PAIR": {
+    "BASE_TOKEN": {
+      "NAME": "SOL",
+      "ADDRESS": "So11111111111111111111111111111111111111112",
+      "DECIMALS": 9,
+      "FULL_NAME": "solana"
+    },
+    "QUOTE_TOKEN": {
+      "NAME": "USDC",
+      "ADDRESS": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "DECIMALS": 6
+    }
+  },
+  "FGI_TIMEFRAME": "15m",
   "SENTIMENT_BOUNDARIES": {
-      "EXTREME_FEAR": 16,
-      "FEAR": 38,
-      "GREED": 66,
-      "EXTREME_GREED": 92
+    "EXTREME_FEAR": 20,
+    "FEAR": 40,
+    "GREED": 65,
+    "EXTREME_GREED": 85
   },
   "SENTIMENT_MULTIPLIERS": {
-      "EXTREME_FEAR": 0.02,
-      "FEAR": 0.01, 
-      "GREED": 0.01,
-      "EXTREME_GREED": 0.02
+    "EXTREME_FEAR": 0.05,
+    "FEAR": 0.03, 
+    "GREED": 0.03,
+    "EXTREME_GREED": 0.05
   },
   "MIN_PROFIT_PERCENT": 0.2,
-  "TRADE_COOLDOWN_MINUTES": 30,       
-  "TRADE_SIZE_METHOD": "STRATEGIC",
+  "TRADE_COOLDOWN_MINUTES": 15,       
+  "TRADE_SIZE_METHOD": "VARIABLE",
   "STRATEGIC_PERCENTAGE": 2.5,        
   "MIN_SENTIMENT_CHANGE": 5,
   "USER_MONTHLY_COST": 0,
-  "DEVELOPER_TIP_PERCENTAGE": 0.029,
-  "MONITOR_MODE": false
+  "DEVELOPER_TIP_PERCENTAGE": 0.01,
+  "MONITOR_MODE": false,
+  "DISCORD_WEBHOOK": "https://discord.com/api/webhooks/your-webhook-id/your-webhook-token",
+  "NOTIFICATIONS_ENABLED": true
 }

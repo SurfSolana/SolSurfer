@@ -18,6 +18,7 @@ SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC 
 - 💼 Automated trading
 - 📊 Performance tracking
 - 🖥️ Web dashboard
+- 🔔 Discord notifications
 - 🔒 Security features
 
 ## Contents 📑
@@ -32,6 +33,7 @@ SolSurfer is a **free, self-hosted crypto trading bot** that automates SOL/USDC 
   - [Configuration Parameters](#configuration-parameters-)
 - [Running SolSurfer](#running-solsurfer-%EF%B8%8F)
 - [Dashboard Features](#dashboard-features-)
+- [Discord Notifications](#discord-notifications-)
 - [Risk Disclaimer](#risk-disclaimer-%EF%B8%8F)
 - [License](#license-)
 - [Contributing](#contributing-)
@@ -191,6 +193,14 @@ Configure trading parameters in `settings.json` or via the web interface:
 }
 ```
 
+### Notification Settings
+```json
+{
+    "DISCORD_WEBHOOK": "",              // Discord webhook URL for notifications
+    "NOTIFICATIONS_ENABLED": true       // Enable/disable Discord notifications
+}
+```
+
 ### Parameter Explanations
 
 #### Sentiment Boundaries
@@ -266,6 +276,68 @@ The web interface provides:
 - Portfolio metrics
 - Trade notifications
 - Analytics
+
+## Discord Notifications 🔔
+
+SolSurfer now includes Discord integration that sends you:
+
+- 🚀 **Startup notifications** when the bot begins running
+- 📊 **Daily reports** with detailed trading statistics and performance metrics
+
+This helps you monitor your bot's activity even when you're away from the dashboard.
+
+### Setting Up Discord Notifications
+
+#### Step 1: Create a Discord Webhook
+1. Open Discord and navigate to the server where you want to receive notifications
+2. Right-click on the channel and select "Edit Channel"
+3. Go to "Integrations" tab
+4. Click on "Webhooks"
+5. Click the "New Webhook" button
+6. Give your webhook a name (e.g., "SolSurfer Bot")
+7. Optionally, customize the avatar
+8. Click "Copy Webhook URL" to copy the webhook URL to your clipboard
+9. Click "Save"
+
+#### Step 2: Add Webhook URL to SolSurfer
+1. Open your `settings.json` file in the `user` folder of your SolSurfer installation
+2. Locate or add the following fields at the end of the file:
+   ```json
+   "DISCORD_WEBHOOK": "paste-your-webhook-url-here",
+   "NOTIFICATIONS_ENABLED": true
+   ```
+3. Paste your copied webhook URL between the quotes for the `DISCORD_WEBHOOK` field
+4. Save the file
+
+#### Step 3: Restart and Test
+1. Restart your SolSurfer bot
+2. You should receive a startup notification in your Discord channel
+3. After 24 hours, you'll receive your first daily report
+4. To test notifications immediately, you can run the included test script:
+   ```
+   cd user
+   node discord_test.js
+   ```
+
+### Notification Types
+
+#### Startup Notification
+Sent when the bot starts running. Includes:
+- Trading pair information
+- Trading method (VARIABLE or STRATEGIC)
+- Monitor mode status
+- Timeframe settings
+- Trade cooldown period
+
+#### Daily Report
+Sent every 24 hours with:
+- Current token balances
+- Price information
+- Performance metrics (net change, percent change)
+- Trade count for the past 24 hours
+- Total trading volume
+
+For detailed setup instructions with screenshots, see [Discord Setup Guide](user/DISCORD_SETUP.md).
 
 ## Risk Disclaimer ⚠️
 

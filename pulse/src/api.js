@@ -40,7 +40,7 @@ const DEFAULT_MAX_AUTO_SLIPPAGE_BPS = 500;
 let lastFGIValue = null;
 
 /**
- * Fetches the current Fear and Greed Index for Solana
+ * Fetches the current Fear and Greed Index for a token using the SolSurfer API
  * @returns {Promise<number>} The current FGI value (0-100)
  */
 async function fetchFearGreedIndex() {
@@ -52,52 +52,50 @@ async function fetchFearGreedIndex() {
         // Use the configured timeframe or default to 15m
         const timeframe = settings.FGI_TIMEFRAME || "15m";
         
-        // Validate the timeframe (only allow valid values)
-        const validTimeframes = ["15m", "1h", "4h"];
-        const validatedTimeframe = validTimeframes.includes(timeframe) ? timeframe : "15m";
+        // Convert timeframe format for API URL (15m → 15min)
+        let apiTimeframe = timeframe;
+        if (timeframe === "15m") {
+            apiTimeframe = "15min";
+        }
         
-        // Construct the URL with the appropriate timeframe
+        // Get the base token from settings
         const targetToken = getBaseToken();
-        const url = `https://cfgi.io/${targetToken.FULL_NAME}-fear-greed-index/${validatedTimeframe}`;
-        console.log(url);
         
-        const response = await axios.get(url);
-        const html = response.data;
-        const $ = cheerio.load(html);
-        const scriptContent = $('script:contains("series:")').html();
+        // Construct the API URL with token ID and timeframe
+        const apiUrl = `https://api.surfsolana.com/${targetToken.NAME}/${apiTimeframe}/latest.json`;
+        devLog(`${icons.info} Fetching FGI from: ${apiUrl}`);
         
-        // Rest of the function remains the same
-        if (!scriptContent) {
-            throw new Error('Could not find script containing series data');
+        // Make API request
+        const response = await axios.get(apiUrl);
+        
+        // Validate response
+        if (!response.data || typeof response.data.fgi !== 'number') {
+            throw new Error('Invalid API response format');
         }
         
-        const seriesMatch = scriptContent.match(/series:\s*\[(\d+)\]/);
-
-        if (!seriesMatch) {
-            throw new Error('Could not parse series data from script');
-        }
+        const fgiValue = response.data.fgi;
         
-        const seriesNumber = parseInt(seriesMatch[1]);
-        
-        if (isNaN(seriesNumber) || seriesNumber < 0 || seriesNumber > 100) {
-            throw new Error(`Invalid FGI value: ${seriesNumber}`);
+        // Validate the FGI value
+        if (isNaN(fgiValue) || fgiValue < 0 || fgiValue > 100) {
+            throw new Error(`Invalid FGI value: ${fgiValue}`);
         }
         
         // Update and log the value
-        lastFGIValue = seriesNumber;
-        devLog(`${icons.sentiment} Current Fear and Greed Index: ${styles.important}${seriesNumber}${colours.reset}`);
-        devLog(`${icons.settings} Using timeframe: ${styles.important}${validatedTimeframe}${colours.reset}`);
+        lastFGIValue = fgiValue;
+        devLog(`${icons.sentiment} Current Fear and Greed Index: ${styles.important}${fgiValue}${colours.reset}`);
+        devLog(`${icons.settings} Using timeframe: ${styles.important}${timeframe}${colours.reset}`);
         
-        return seriesNumber;
+        return fgiValue;
     } catch (error) {
         console.error(formatError(`${icons.error} Error fetching Fear and Greed Index: ${error.message}`));
         
-        // Rest of error handling remains the same
+        // If we have a last known value, use that
         if (lastFGIValue !== null) {
             devLog(formatInfo(`${icons.info} Using last known FGI value: ${lastFGIValue}`));
             return lastFGIValue;
         }
         
+        // Otherwise use the default value
         devLog(formatWarning(`${icons.warning} Using default FGI value: ${DEFAULT_FGI_VALUE}`));
         return DEFAULT_FGI_VALUE;
     }
@@ -140,32 +138,45 @@ function getSentiment(data) {
 }
 
 /**
- * Fetches the current price of a token with retry logic
- * @param {string} baseUrl - Base URL for the price API
- * @param {string} tokenAddress - Token address
+ * Fetches the current price of a token from the SurfSolana API
+ * @param {string} baseUrl - Base URL for the price API (for backward compatibility, not used)
+ * @param {string} tokenAddress - Token address (for backward compatibility, not used)
  * @param {number} maxRetries - Maximum number of retry attempts
  * @param {number} retryDelay - Delay between retries in milliseconds
  * @returns {Promise<number>} The token price
  */
 async function fetchPrice(baseUrl = BASE_PRICE_URL, tokenAddress, maxRetries = MAX_PRICE_RETRIES, retryDelay = PRICE_RETRY_DELAY) {
-    if (!baseUrl || !tokenAddress) {
-        throw new Error('BASE_PRICE_URL and tokenAddress are required');
-    }
-
+    // Keep parameter signature for backward compatibility
+    
+    // Get base token information
     const baseToken = getBaseToken();
     let lastError = null;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const response = await axios.get(`${baseUrl}${tokenAddress}`);
+            // Get timeframe from settings for consistency with fetchFearGreedIndex
+            const { readSettings } = require('./pulseServer');
+            const settings = readSettings();
+            const timeframe = settings.FGI_TIMEFRAME || "15m";
             
-            // Validate response structure
-            if (!response.data?.data?.[tokenAddress]) {
-                throw new Error('Invalid response structure');
+            // Convert timeframe format for API URL (15m → 15min)
+            let apiTimeframe = timeframe;
+            if (timeframe === "15m") {
+                apiTimeframe = "15min";
             }
             
-            const priceData = response.data.data[tokenAddress];
-            const price = parseFloat(priceData.price);
+            // Construct the API URL using the same pattern as fetchFearGreedIndex
+            const apiUrl = `https://api.surfsolana.com/${baseToken.NAME}/${apiTimeframe}/latest.json`;
+            devLog(`${icons.price} Fetching price from: ${apiUrl}`);
+            
+            const response = await axios.get(apiUrl);
+            
+            // Validate response structure
+            if (!response.data?.price || typeof response.data.price !== 'number') {
+                throw new Error('Invalid price data structure in API response');
+            }
+            
+            const price = parseFloat(response.data.price);
             
             // Validate price value
             if (!price || isNaN(price)) {

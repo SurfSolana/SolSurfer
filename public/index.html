@@ -246,6 +246,60 @@
         <div class="popup-content">
             <button id="closePopupButton" class="close-popup-button">×</button>
             <h1>Settings</h1>
+            
+            <!-- Add this new section for strategy selection -->
+            <div class="strategy-toggle">
+                <label>Trading Strategy:</label>
+                <div class="toggle-switch-container">
+                    <span>Sentiment</span>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="thresholdModeToggle">
+                        <label for="thresholdModeToggle"></label>
+                    </div>
+                    <span>Threshold</span>
+                </div>
+            </div>
+            
+            <!-- Threshold Strategy Settings (initially hidden) -->
+            <div id="thresholdSettings" style="display:none;">
+                <div class="threshold-settings-group">
+                    <div class="user-input">
+                        <label for="threshold">FGI Threshold (0-100):</label>
+                        <div class="input-container">
+                            <input type="number" id="threshold" name="threshold" min="0" max="100" step="1" value="50">
+                            <button type="button" id="thresholdButton" class="settingButton">Apply</button>
+                        </div>
+                    </div>
+                    <div class="user-input">
+                        <label for="allocationPercentage">Allocation Percentage (%):</label>
+                        <div class="input-container">
+                            <input type="number" id="allocationPercentage" name="allocationPercentage" min="50" max="100" step="1" value="95">
+                            <button type="button" id="allocationButton" class="settingButton">Apply</button>
+                        </div>
+                    </div>
+                    <div class="user-input">
+                        <label for="switchDelay">Switch Delay (cycles):</label>
+                        <div class="input-container">
+                            <input type="number" id="switchDelay" name="switchDelay" min="1" max="20" step="1" value="1">
+                            <button type="button" id="switchDelayButton" class="settingButton">Apply</button>
+                        </div>
+                    </div>
+                    <div class="user-input">
+                        <label for="feePercentage">Fee Percentage (%):</label>
+                        <div class="input-container">
+                            <input type="number" id="feePercentage" name="feePercentage" min="0.001" max="2" step="0.001" value="0.001">
+                            <button type="button" id="feeButton" class="settingButton">Apply</button>
+                        </div>
+                    </div>
+                    <div class="user-input">
+                        <label for="minTradeAmount">Min Trade Amount:</label>
+                        <div class="input-container">
+                            <input type="number" id="minTradeAmount" name="minTradeAmount" min="0.00001" max="1" step="0.00001" value="0.00001">
+                            <button type="button" id="minTradeButton" class="settingButton">Apply</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="button-column">
                 <div class="user-input">
                     <label for="monthlyCost">Monthly Cost (USD):</label>

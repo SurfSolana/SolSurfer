@@ -1,6 +1,7 @@
 /**
  * PulseSurfer Trading Bot
  * Automated trading system that uses sentiment analysis to trade Solana Tokens
+ * Now with support for threshold-based strategy
  */
 
 // Core dependencies
@@ -74,6 +75,9 @@ const {
     getConnection 
 } = require('./globalState');
 const cliProgress = require('cli-progress');
+
+// Import the threshold strategy module
+const thresholdStrategy = require('./threshold');
 
 // Global state management
 let isCurrentExecutionCancelled = false;
@@ -419,6 +423,98 @@ async function executeClosingTrade(sentiment) {
 }
 
 /**
+ * Execute a trade using the threshold strategy
+ * @param {number} fearGreedIndex - Current Fear & Greed Index value
+ * @param {number} currentPrice - Current token price
+ * @param {Object} wallet - Wallet object
+ * @param {Object} thresholdSettings - Threshold strategy settings
+ * @returns {Object|null} - Trade result or null if no trade needed
+ */
+async function executeThresholdStrategyTrade(fearGreedIndex, currentPrice, wallet, thresholdSettings) {
+    try {
+        console.log(formatHeading("=== THRESHOLD STRATEGY TRADING ==="));
+        
+        // Get token information
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
+        
+        // Update threshold state with current FGI value
+        const thresholdState = thresholdStrategy.updateThresholdState(fearGreedIndex, thresholdSettings);
+        
+        // Display threshold strategy state information
+        console.log(formatInfo(`${icons.sentiment} FGI Value: ${fearGreedIndex} / Threshold: ${thresholdSettings.THRESHOLD}`));
+        console.log(formatInfo(`${icons.stats} Consecutive readings: Above threshold: ${thresholdState.daysAboveThreshold}, Below threshold: ${thresholdState.daysBelowThreshold}`));
+        console.log(formatInfo(`${icons.settings} Allocation state: ${thresholdState.inHighAllocation === true ? "High " + baseToken.NAME : (thresholdState.inHighAllocation === false ? "High " + quoteToken.NAME : "Not set")}`));
+        
+        // Check if we need to rebalance
+        if (!thresholdState.needsRebalance) {
+            console.log(formatInfo(`${icons.info} No portfolio rebalance needed based on threshold strategy`));
+            return null;
+        }
+        
+        // Get current allocations
+        const currentAllocations = thresholdStrategy.getCurrentAllocations(
+            wallet.baseBalance, 
+            wallet.quoteBalance, 
+            currentPrice
+        );
+        
+        // Determine target allocations
+        const shouldAllocateHighSOL = thresholdState.shouldSwitchToHighSOL;
+        
+        console.log(formatInfo(`${icons.trade} ${shouldAllocateHighSOL ? "FGI above threshold - allocating high " + baseToken.NAME : "FGI below threshold - allocating high " + quoteToken.NAME}`));
+        
+        const targetAllocations = thresholdStrategy.calculateTargetAllocations(
+            shouldAllocateHighSOL,
+            currentAllocations.totalValue,
+            currentPrice,
+            thresholdSettings.ALLOCATION_PERCENTAGE
+        );
+        
+        // Calculate trade needed for rebalance
+        const tradeParams = thresholdStrategy.calculateRebalanceTrade(
+            currentAllocations,
+            targetAllocations,
+            thresholdSettings
+        );
+        
+        if (!tradeParams) {
+            console.log(formatInfo(`${icons.info} No significant trade needed for rebalance`));
+            return null;
+        }
+        
+        // Execute the trade
+        console.log(formatInfo(`${icons.trade} Executing ${tradeParams.type} trade: ${Math.abs(tradeParams.baseTokenChange).toFixed(6)} ${baseToken.NAME}`));
+        
+        // Use the existing swap execution logic
+        const swapResult = await executeSwap(wallet, tradeParams.isBuyingBase ? "EXTREME_FEAR" : "EXTREME_GREED");
+        
+        if (swapResult && typeof swapResult === 'object') {
+            console.log(formatSuccess(`${icons.success} Rebalance trade executed successfully`));
+            
+            // Update the allocation state after successful trade
+            thresholdStrategy.updateAllocationState(shouldAllocateHighSOL);
+            
+            // Add trade to orderbook
+            orderBook.addTrade(
+                swapResult.price,
+                swapResult.baseTokenChange,
+                swapResult.quoteTokenChange,
+                swapResult.txId
+            );
+            
+            return swapResult;
+        } else {
+            console.log(formatError(`${icons.error} Rebalance trade failed`));
+            return null;
+        }
+    } catch (error) {
+        console.error(formatError(`Error executing threshold strategy trade: ${error.message}`));
+        return null;
+    }
+}
+
+/**
  * Process and display enhanced trading statistics
  * @param {Object} stats - Trading statistics
  */
@@ -542,7 +638,8 @@ function savePositionState(tradingData) {
         },
         tradingData,
         settings: readSettings(),
-        orderBook: orderBook.getState()
+        orderBook: orderBook.getState(),
+        thresholdState: thresholdStrategy.getThresholdState()
     });
 }
 
@@ -660,95 +757,127 @@ async function main() {
         let swapResult = null;
         let recentTrade = null;
 
-        // Pulse trading logic - trade on any non-neutral sentiment
-        if (!MONITOR_MODE && sentiment !== "NEUTRAL") {
-            // Check if we have any positions to close and if we can open new ones
-            const hasPositionToClose = await hasOpposingTrades(sentiment);
-            
-            // Set up parallel execution of close and open trades
-            const tradeOperations = [];
-            
-            console.log(formatHeading("=== PARALLEL TRADING OPERATIONS ==="));
-            
-            // Add closing trade operation if needed
-            if (hasPositionToClose) {
-                console.log(formatInfo(`${icons.close} CLOSING OPERATION: Found opposing position to close - starting operation`));
-                const closingOperation = executeClosingTrade(sentiment)
-                    .then(result => ({ type: 'close', result }));
-                tradeOperations.push(closingOperation);
-            }
-            
-            // Always add opening trade operation
-            console.log(formatInfo(`${icons.open} OPENING OPERATION: Starting new position operation`));
-            const openingOperation = executeOpeningTrade(sentiment)
-                .then(result => ({ type: 'open', result }));
-            tradeOperations.push(openingOperation);
-            
-            console.log(formatInfo(`${icons.running} Both operations running in parallel - this may take a moment...`));
-            
-            // Wait for all operations to complete and process results
-            const results = await Promise.all(tradeOperations);
-            
-            console.log(formatHeading("=== TRADING RESULTS ==="));
-            
-            // Process each completed operation
-            for (const { type, result } of results) {
-                if (!result) {
-                    console.log(formatWarning(`${type.toUpperCase()} OPERATION: No result returned`));
-                    continue;
-                }
+        // Check which trading mode to use
+        const isThresholdMode = settings.THRESHOLD_MODE === true;
+        const isMonitorMode = MONITOR_MODE || settings.MONITOR_MODE === true;
+
+        if (!isMonitorMode) {
+            if (isThresholdMode) {
+                // Use threshold-based strategy
+                const thresholdSettings = settings.THRESHOLD_SETTINGS || {
+                    THRESHOLD: 50,
+                    ALLOCATION_PERCENTAGE: 95,
+                    SWITCH_DELAY: 1,
+                    FEE_PERCENTAGE: 0.001,
+                    MIN_TRADE_AMOUNT: 0.00001
+                };
                 
-                if (type === 'close' && result.swapResult) {
-                    // Process closing trade
-                    swapResult = result.swapResult;
-                    orderBook.closeTrade(result.closedTradeId, swapResult.price);
-                    console.log(formatSuccess(`${icons.close} CLOSING OPERATION: Successfully closed trade ID: ${result.closedTradeId.substring(0, 12)}...`));
+                // Execute threshold strategy trade
+                swapResult = await executeThresholdStrategyTrade(fearGreedIndex, currentPrice, wallet, thresholdSettings);
+                
+                if (swapResult) {
+                    txId = swapResult.txId;
+                    // Update position
+                    const trade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                    if (trade) {
+                        addRecentTrade(trade);
+                        recentTrade = trade;
+                    }
+                }
+            } else {
+                // Use original sentiment-based strategy
+                if (sentiment !== "NEUTRAL") {
+                    // Check if we have any positions to close and if we can open new ones
+                    const hasPositionToClose = await hasOpposingTrades(sentiment);
                     
-                    // Update position from closing trade
-                    const closedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
-                    if (closedTrade) {
-                        addRecentTrade(closedTrade);
-                        console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${closedTrade.type} ${formatBalance(closedTrade.amount, baseToken.NAME)} at ${formatPrice(closedTrade.price)}`);
-                        recentTrade = closedTrade;
+                    // Set up parallel execution of close and open trades
+                    const tradeOperations = [];
+                    
+                    console.log(formatHeading("=== PARALLEL TRADING OPERATIONS ==="));
+                    
+                    // Add closing trade operation if needed
+                    if (hasPositionToClose) {
+                        console.log(formatInfo(`${icons.close} CLOSING OPERATION: Found opposing position to close - starting operation`));
+                        const closingOperation = executeClosingTrade(sentiment)
+                            .then(result => ({ type: 'close', result }));
+                        tradeOperations.push(closingOperation);
                     }
                     
-                    txId = swapResult.txId;
-                }
-                else if (type === 'open') {
-                    if (result !== 'cooldownfail' && result !== 'fgichangefail') {
-                        // Process opening trade
-                        swapResult = result;
-                        txId = result.txId; // Prioritize the opening trade ID
-                        
-                        // Add to orderbook
-                        orderBook.addTrade(
-                            swapResult.price, 
-                            swapResult.baseTokenChange, 
-                            swapResult.quoteTokenChange, 
-                            swapResult.txId
-                        );
-                        
-                        // Update position
-                        const openedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
-                        if (openedTrade) {
-                            addRecentTrade(openedTrade);
-                            console.log(formatSuccess(`${icons.open} OPENING OPERATION: Successfully opened new position`));
-                            console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${openedTrade.type} ${formatBalance(openedTrade.amount, baseToken.NAME)} at ${formatPrice(openedTrade.price)}`);
-                            recentTrade = openedTrade;
+                    // Always add opening trade operation
+                    console.log(formatInfo(`${icons.open} OPENING OPERATION: Starting new position operation`));
+                    const openingOperation = executeOpeningTrade(sentiment)
+                        .then(result => ({ type: 'open', result }));
+                    tradeOperations.push(openingOperation);
+                    
+                    console.log(formatInfo(`${icons.running} Both operations running in parallel - this may take a moment...`));
+                    
+                    // Wait for all operations to complete and process results
+                    const results = await Promise.all(tradeOperations);
+                    
+                    console.log(formatHeading("=== TRADING RESULTS ==="));
+                    
+                    // Process each completed operation
+                    for (const { type, result } of results) {
+                        if (!result) {
+                            console.log(formatWarning(`${type.toUpperCase()} OPERATION: No result returned`));
+                            continue;
                         }
-                    } 
-                    else if (result === 'cooldownfail' || result === 'fgichangefail') {
-                        console.log(formatWarning(`${icons.warning} OPENING OPERATION: Trade skipped due to cooldown or FGI change`));
+                        
+                        if (type === 'close' && result.swapResult) {
+                            // Process closing trade
+                            swapResult = result.swapResult;
+                            orderBook.closeTrade(result.closedTradeId, swapResult.price);
+                            console.log(formatSuccess(`${icons.close} CLOSING OPERATION: Successfully closed trade ID: ${result.closedTradeId.substring(0, 12)}...`));
+                            
+                            // Update position from closing trade
+                            const closedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                            if (closedTrade) {
+                                addRecentTrade(closedTrade);
+                                console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${closedTrade.type} ${formatBalance(closedTrade.amount, baseToken.NAME)} at ${formatPrice(closedTrade.price)}`);
+                                recentTrade = closedTrade;
+                            }
+                            
+                            txId = swapResult.txId;
+                        }
+                        else if (type === 'open') {
+                            if (result !== 'cooldownfail' && result !== 'fgichangefail') {
+                                // Process opening trade
+                                swapResult = result;
+                                txId = result.txId; // Prioritize the opening trade ID
+                                
+                                // Add to orderbook
+                                orderBook.addTrade(
+                                    swapResult.price, 
+                                    swapResult.baseTokenChange, 
+                                    swapResult.quoteTokenChange, 
+                                    swapResult.txId
+                                );
+                                
+                                // Update position
+                                const openedTrade = updatePositionFromSwap(position, swapResult, sentiment, currentPrice);
+                                if (openedTrade) {
+                                    addRecentTrade(openedTrade);
+                                    console.log(formatSuccess(`${icons.open} OPENING OPERATION: Successfully opened new position`));
+                                    console.log(`   ${formatTimestamp(getTimestamp(), false)}: ${openedTrade.type} ${formatBalance(openedTrade.amount, baseToken.NAME)} at ${formatPrice(openedTrade.price)}`);
+                                    recentTrade = openedTrade;
+                                }
+                            } 
+                            else if (result === 'cooldownfail' || result === 'fgichangefail') {
+                                console.log(formatWarning(`${icons.warning} OPENING OPERATION: Trade skipped due to cooldown or FGI change`));
+                            }
+                        }
                     }
                 }
             }
-            
-            // Update balances after all trading operations
+        } else {
+            console.log(formatInfo(`${icons.info} Monitor Mode: Data collected without trading.`));
+        }
+
+        // Update balances after all trading operations
+        if (swapResult) {
             console.log(formatInfo(`\n${icons.balance} Updating portfolio balances after trades...`));
             const updatedBalances = await updatePortfolioBalances(wallet, connection);
             position.updateBalances(updatedBalances.baseBalance, updatedBalances.quoteBalance);
-        } else if (MONITOR_MODE) {
-            console.log(formatInfo(`${icons.info} Monitor Mode: Data collected without trading.`));
         }
 
         // Calculate and display enhanced statistics
@@ -832,6 +961,19 @@ async function initialize() {
             
             // Set initial data for UI
             setInitialData(savedState.tradingData);
+            
+            // Restore threshold state if available
+            if (savedState.thresholdState) {
+                // Deep clone to avoid reference issues
+                const thresholdStateData = JSON.parse(JSON.stringify(savedState.thresholdState));
+                Object.keys(thresholdStrategy.getThresholdState()).forEach(key => {
+                    if (thresholdStateData[key] !== undefined) {
+                        thresholdStrategy.getThresholdState()[key] = thresholdStateData[key];
+                    }
+                });
+                devLog("Threshold state restored from saved state");
+            }
+            
             devLog("Position and initial data set from saved state");
         } else {
             console.log(formatInfo(`${icons.info} No saved state found - starting fresh`));
@@ -847,6 +989,18 @@ async function initialize() {
         const baseToken = getBaseToken();
         const quoteToken = getQuoteToken();
         console.log(formatInfo(`${icons.trade} Trading pair: ${styles.important}${baseToken.NAME}/${quoteToken.NAME}${colours.reset}`));
+        
+        // Display threshold mode status
+        const settings = readSettings();
+        const isThresholdMode = settings.THRESHOLD_MODE === true;
+        console.log(formatInfo(`${icons.settings} Trading strategy: ${isThresholdMode ? 
+            styles.important + 'Threshold Strategy' + colours.reset : 
+            styles.important + 'Sentiment Strategy' + colours.reset}`));
+        
+        if (isThresholdMode && settings.THRESHOLD_SETTINGS) {
+            const ts = settings.THRESHOLD_SETTINGS;
+            console.log(formatInfo(`${icons.settings} Threshold: ${styles.important}${ts.THRESHOLD}${colours.reset}, Allocation: ${styles.important}${ts.ALLOCATION_PERCENTAGE}%${colours.reset}, Delay: ${styles.important}${ts.SWITCH_DELAY}${colours.reset}`));
+        }
         
         // Fetch initial price data
         console.log(formatInfo(`${icons.price} Fetching initial price data...`));
@@ -899,8 +1053,13 @@ async function resetPosition() {
         
         // Reset order book
         console.log(formatInfo(`${icons.settings} Resetting order book...`));
+        orderBook.updateStoragePathForTokens();
         orderBook.trades = [];
         orderBook.saveTrades();
+        
+        // Reset threshold strategy state
+        console.log(formatInfo(`${icons.settings} Resetting threshold strategy state...`));
+        thresholdStrategy.resetThresholdState();
 
         // Get current fear & greed index
         console.log(formatInfo(`${icons.sentiment} Fetching Fear & Greed Index...`));
@@ -960,7 +1119,8 @@ async function resetPosition() {
             },
             tradingData: initialData,
             settings: readSettings(),
-            orderBook: orderBook.getState()
+            orderBook: orderBook.getState(),
+            thresholdState: thresholdStrategy.getThresholdState()
         });
         
         console.log(formatSuccess(`${icons.success} Position reset complete`));
@@ -999,6 +1159,20 @@ function handleParameterUpdate(newParams) {
             // Update orderBook to use new token-specific file
             orderBook.updateStoragePathForTokens();
             console.log(formatSuccess(`${icons.success} OrderBook updated for new token pair`));
+        }
+    }
+
+    // Check if trading mode changed
+    const oldThresholdMode = updatedSettings.THRESHOLD_MODE;
+    const newThresholdMode = newParams.THRESHOLD_MODE;
+    
+    if (oldThresholdMode !== newThresholdMode) {
+        console.log(formatInfo(`${icons.settings} Trading mode changed: ${oldThresholdMode ? 'Threshold' : 'Sentiment'} → ${newThresholdMode ? 'Threshold' : 'Sentiment'}`));
+        
+        // Reset threshold state if switching to threshold mode
+        if (newThresholdMode) {
+            thresholdStrategy.resetThresholdState();
+            console.log(formatInfo(`${icons.settings} Threshold strategy state reset`));
         }
     }
 

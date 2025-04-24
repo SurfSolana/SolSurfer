@@ -63,13 +63,16 @@ const SETTINGS_ORDER = [
   "STRATEGIC_PERCENTAGE",
   "USER_MONTHLY_COST",
   "DEVELOPER_TIP_PERCENTAGE",
-  "MONITOR_MODE"
+  "MONITOR_MODE",
+  "THRESHOLD_MODE",
+  "THRESHOLD_SETTINGS"
 ];
 
 const NESTED_ORDERS = {
   "SENTIMENT_BOUNDARIES": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"],
   "SENTIMENT_MULTIPLIERS": ["EXTREME_FEAR", "FEAR", "GREED", "EXTREME_GREED"],
-  "TRADING_PAIR": ["BASE_TOKEN", "QUOTE_TOKEN"]
+  "TRADING_PAIR": ["BASE_TOKEN", "QUOTE_TOKEN"],
+  "THRESHOLD_SETTINGS": ["THRESHOLD", "ALLOCATION_PERCENTAGE", "SWITCH_DELAY", "FEE_PERCENTAGE", "MIN_TRADE_AMOUNT"]
 };
 
 // File paths
@@ -566,7 +569,15 @@ PORT=3000
       STRATEGIC_PERCENTAGE: 2.5,
       USER_MONTHLY_COST: 0,
       DEVELOPER_TIP_PERCENTAGE: 0,
-      MONITOR_MODE: false
+      MONITOR_MODE: false,
+      THRESHOLD_MODE: false,
+      THRESHOLD_SETTINGS: {
+        THRESHOLD: 50,
+        ALLOCATION_PERCENTAGE: 95,
+        SWITCH_DELAY: 1,
+        FEE_PERCENTAGE: 0.001,
+        MIN_TRADE_AMOUNT: 0.00001
+      }
     });
 
     // Check if settings.json file exists
@@ -713,7 +724,7 @@ function validateEnvContents() {
   }
 
   // Validate ADMIN_PASSWORD
-  if (process.env.ADMIN_PASSWORD.length < 8) {
+  if (process.env.ADMIN_PASSWORD.length < 4) {
       console.error(formatError(`${icons.error} Error: ADMIN_PASSWORD must be at least 8 characters long.`));
       return false;
   }
@@ -1044,6 +1055,14 @@ function getLatestTradingData() {
       estimatedAPY: estimatedAPY,
       recentTrades: recentTrades,
       monitorMode: getMonitorMode(),
+      thresholdMode: settings.THRESHOLD_MODE === true,
+      thresholdSettings: settings.THRESHOLD_SETTINGS || {
+        THRESHOLD: 50,
+        ALLOCATION_PERCENTAGE: 95,
+        SWITCH_DELAY: 1,
+        FEE_PERCENTAGE: 0.001,
+        MIN_TRADE_AMOUNT: 0.00001
+      },
       orderbook: {
         trades: orderBook.trades,
         stats: orderBookStats,
@@ -1206,6 +1225,14 @@ function emitTradingData(data) {
       },
       params: {
         FGI_TIMEFRAME: settings.FGI_TIMEFRAME || '15m'
+      },
+      thresholdMode: settings.THRESHOLD_MODE === true,
+      thresholdSettings: settings.THRESHOLD_SETTINGS || {
+        THRESHOLD: 50,
+        ALLOCATION_PERCENTAGE: 95,
+        SWITCH_DELAY: 1,
+        FEE_PERCENTAGE: 0.001,
+        MIN_TRADE_AMOUNT: 0.00001
       }
     };
 

@@ -196,9 +196,22 @@ function updateTradingData(data) {
     }
 
     // Update token pair in the title with timeframe
+    const strategyText = data.thresholdMode ? 
+        `<span class="strategy-badge strategy-threshold">Threshold Mode</span>` : 
+        `<span class="strategy-badge strategy-sentiment">Sentiment Mode</span>`;
+    
     const tokenPairTitle = document.getElementById('tokenPairTitle');
     if (tokenPairTitle && baseTokenName && quoteTokenName) {
-        tokenPairTitle.textContent = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe})`;
+        tokenPairTitle.innerHTML = `> ${baseTokenName}/${quoteTokenName} (${currentTimeframe}) ${strategyText}`;
+    }
+    
+    // Update threshold toggle state
+    const thresholdToggle = document.getElementById('thresholdModeToggle');
+    const thresholdSettings = document.getElementById('thresholdSettings');
+    
+    if (thresholdToggle && data.thresholdMode !== undefined) {
+        thresholdToggle.checked = data.thresholdMode;
+        thresholdSettings.style.display = data.thresholdMode ? 'block' : 'none';
     }
 
     tooltipDefinitions = createTooltipDefinitions(baseTokenName, quoteTokenName);
@@ -240,6 +253,20 @@ function updateTradingData(data) {
             { label: "Program Run Time (Hours/Mins/Seconds)", value: `${data.programRunTime || 'Please Wait'}`, icon: "fa-solid fa-clock" },
             { label: `Estimated APY (Compared to Holding 100% ${baseTokenName})`, value: formatValue(data.estimatedAPY, '', typeof data.estimatedAPY === 'number' ? '%' : ''), icon: "fa-solid fa-chart-line" }
         );
+    }
+
+    if (data.thresholdSettings) {
+        const settings = data.thresholdSettings;
+        if (document.getElementById('threshold')) 
+            document.getElementById('threshold').value = settings.THRESHOLD;
+        if (document.getElementById('allocationPercentage')) 
+            document.getElementById('allocationPercentage').value = settings.ALLOCATION_PERCENTAGE;
+        if (document.getElementById('switchDelay')) 
+            document.getElementById('switchDelay').value = settings.SWITCH_DELAY;
+        if (document.getElementById('feePercentage')) 
+            document.getElementById('feePercentage').value = settings.FEE_PERCENTAGE;
+        if (document.getElementById('minTradeAmount')) 
+            document.getElementById('minTradeAmount').value = settings.MIN_TRADE_AMOUNT;
     }
 
     if (data.orderbook) {
@@ -493,6 +520,16 @@ function fetchInitialData() {
         .then(data => {
             updateTradingData(data);
             updateTradeList(data.recentTrades);
+            
+            // Initialize threshold settings UI
+            const thresholdToggle = document.getElementById('thresholdModeToggle');
+            const thresholdSettings = document.getElementById('thresholdSettings');
+            
+            if (thresholdToggle && data.thresholdMode !== undefined) {
+                thresholdToggle.checked = data.thresholdMode;
+                thresholdSettings.style.display = data.thresholdMode ? 'block' : 'none';
+            }
+            
             return authenticatedFetch('/api/params');
         })
         .then(response => response.json())
@@ -713,6 +750,57 @@ function showFeedback(message, type) {
     }, 5000);
 }
 
+// Handle threshold mode toggle
+document.getElementById('thresholdModeToggle').addEventListener('change', function() {
+    const thresholdSettings = document.getElementById('thresholdSettings');
+    if (this.checked) {
+        thresholdSettings.style.display = 'block';
+    } else {
+        thresholdSettings.style.display = 'none';
+    }
+    
+    // Update threshold mode setting
+    const params = {
+        THRESHOLD_MODE: this.checked
+    };
+    
+    paramsApi(params);
+});
+
+// Handle threshold settings buttons
+document.getElementById('thresholdButton').addEventListener('click', function() {
+    updateThresholdSetting('THRESHOLD', 'threshold');
+});
+
+document.getElementById('allocationButton').addEventListener('click', function() {
+    updateThresholdSetting('ALLOCATION_PERCENTAGE', 'allocationPercentage');
+});
+
+document.getElementById('switchDelayButton').addEventListener('click', function() {
+    updateThresholdSetting('SWITCH_DELAY', 'switchDelay');
+});
+
+document.getElementById('feeButton').addEventListener('click', function() {
+    updateThresholdSetting('FEE_PERCENTAGE', 'feePercentage');
+});
+
+document.getElementById('minTradeButton').addEventListener('click', function() {
+    updateThresholdSetting('MIN_TRADE_AMOUNT', 'minTradeAmount');
+});
+
+function updateThresholdSetting(settingName, inputId) {
+    const inputElement = document.getElementById(inputId);
+    const value = inputElement.type === 'number' ? parseFloat(inputElement.value) : inputElement.value;
+    
+    const params = {
+        THRESHOLD_SETTINGS: {
+            [settingName]: value
+        }
+    };
+    
+    paramsApi(params);
+}
+
 document.getElementById('settingsButton').addEventListener('click', function () {
     document.getElementById('settingsPopup').style.display = 'block';
     document.getElementById('mainContent').classList.add('blur');
@@ -793,5 +881,7 @@ function updateLockIcon(lockIcon, isLocked) {
 document.addEventListener('DOMContentLoaded', () => {
     fetchRecentTrades();
 });
+
+
 
 document.addEventListener('DOMContentLoaded', attachInputListeners);

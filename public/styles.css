@@ -524,6 +524,104 @@ button:hover {
     cursor: pointer;
 }
 
+.strategy-toggle {
+    margin: 15px 0;
+    padding: 10px;
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    background-color: var(--background);
+}
+
+.toggle-switch-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 10px;
+    gap: 10px;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 60px;
+    height: 30px;
+    background-color: var(--background);
+    border-radius: 15px;
+    border: 1px solid var(--primary);
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-switch label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    cursor: pointer;
+    border-radius: 15px;
+    transition: 0.4s;
+}
+
+.toggle-switch label:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 4px;
+    bottom: 3px;
+    background-color: var(--primary);
+    transition: 0.4s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + label:before {
+    transform: translateX(30px);
+    background-color: var(--secondary);
+}
+
+.threshold-settings-group {
+    margin-top: 15px;
+}
+
+.settingButton {
+    background-color: var(--primary);
+    color: var(--text);
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+    margin-left: 5px;
+}
+
+.settingButton:hover {
+    background-color: var(--primary-dark);
+}
+
+.strategy-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-left: 10px;
+}
+
+.strategy-sentiment {
+    background-color: rgba(153, 69, 255, 0.2);
+    color: var(--primary);
+}
+
+.strategy-threshold {
+    background-color: rgba(20, 241, 149, 0.2);
+    color: var(--secondary);
+}
+
 .button-column {
     display: flex;
     flex-direction: column;

@@ -206,9 +206,10 @@ async function fetchPrice(baseUrl = BASE_PRICE_URL, tokenAddress, maxRetries = M
  * @param {string} inputMint - Input token mint address
  * @param {string} outputMint - Output token mint address
  * @param {number} tradeAmountLamports - Trade amount in lamports or smallest token units
+ * @param {string} swapMode - Swap mode ('ExactIn' or 'ExactOut')
  * @returns {Promise<Object>} The quote response
  */
-async function getQuote(inputMint, outputMint, tradeAmountLamports) {
+async function getQuote(inputMint, outputMint, tradeAmountLamports, swapMode = 'ExactIn') {
     const settings = readSettings();
     
     // Calculate fees
@@ -217,40 +218,94 @@ async function getQuote(inputMint, outputMint, tradeAmountLamports) {
     const platformFeeBps = Math.round(totalFeePercentage * 100);
     
     // Get token info for logging
-    const isBaseTokenInput = inputMint === getBaseToken().ADDRESS;
-    const inputToken = isBaseTokenInput ? getBaseToken() : getQuoteToken();
-    const outputToken = isBaseTokenInput ? getQuoteToken() : getBaseToken();
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    const isBaseTokenInput = inputMint === baseToken.ADDRESS;
+    const inputToken = isBaseTokenInput ? baseToken : quoteToken;
+    const outputToken = isBaseTokenInput ? quoteToken : baseToken;
     
     // Log the trade details with proper token names
     devLog(`${icons.trade} Getting quote for ${inputToken.NAME} → ${outputToken.NAME} swap`);
     devLog(`${icons.balance} Amount: ${tradeAmountLamports} ${inputToken.NAME} units (${inputToken.DECIMALS} decimals)`);
+    
+    // Calculate human-readable amount
+    const humanReadableAmount = tradeAmountLamports / Math.pow(10, inputToken.DECIMALS);
+    devLog(`${icons.balance} Human readable amount: ${humanReadableAmount.toFixed(6)} ${inputToken.NAME}`);
     
     // Build quote URL with parameters
     const params = new URLSearchParams({
         inputMint,
         outputMint,
         amount: tradeAmountLamports.toString(),
-        slippageBps: settings.SLIPPAGE_BPS?.toString() || DEFAULT_SLIPPAGE_BPS.toString(),
+        slippageBps: settings.SLIPPAGE_BPS?.toString() || '50',
         platformFeeBps: platformFeeBps.toString(),
-        maxAutoSlippageBps: settings.MAX_AUTO_SLIPPAGE_BPS?.toString() || DEFAULT_MAX_AUTO_SLIPPAGE_BPS.toString(),
+        maxAutoSlippageBps: settings.MAX_AUTO_SLIPPAGE_BPS?.toString() || '500',
         autoSlippage: 'true',
+        swapMode: swapMode
     });
 
     const quoteUrl = `${BASE_SWAP_URL}/quote?${params.toString()}`;
+    devLog(`${icons.network} Jupiter API Quote URL: ${quoteUrl}`);
 
     try {
-        const response = await fetch(quoteUrl);
+        // Add timeout to the fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        devLog(`${icons.wait} Sending request to Jupiter API...`);
+        const response = await fetch(quoteUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            devLog(`${icons.error} Jupiter API Error (${response.status}): ${errorText}`);
+            console.error(formatError(`${icons.error} Error fetching quote: HTTP ${response.status} - ${errorText}`));
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
         }
         
         const quoteResponse = await response.json();
-        devLog(formatSuccess(`${icons.success} Quote response received successfully`));
+        
+        // Log the important parts of the quote response
+        devLog(`${icons.success} Quote response received successfully`);
+        devLog("Jupiter Quote Response:", {
+            inAmount: quoteResponse.inAmount,
+            outAmount: quoteResponse.outAmount,
+            otherAmountThreshold: quoteResponse.otherAmountThreshold,
+            swapMode: quoteResponse.swapMode,
+            slippageBps: quoteResponse.slippageBps,
+            priceImpactPct: quoteResponse.priceImpactPct,
+            routePlan: quoteResponse.routePlan ? quoteResponse.routePlan.map(r => ({
+                percent: r.percent,
+                swapInfo: {
+                    ammKey: r.swapInfo?.ammKey?.substring(0, 10) + '...',
+                    label: r.swapInfo?.label
+                }
+            })) : 'Not available'
+        });
+        
+        // Log human-readable amounts for the quote
+        const inputAmountHuman = quoteResponse.inAmount / Math.pow(10, inputToken.DECIMALS);
+        const outputAmountHuman = quoteResponse.outAmount / Math.pow(10, outputToken.DECIMALS);
+        
+        devLog(`${icons.trade} Quote details:`);
+        devLog(`  Input: ${inputAmountHuman.toFixed(6)} ${inputToken.NAME}`);
+        devLog(`  Output: ${outputAmountHuman.toFixed(6)} ${outputToken.NAME}`);
+        devLog(`  Rate: 1 ${inputToken.NAME} = ${(outputAmountHuman / inputAmountHuman).toFixed(6)} ${outputToken.NAME}`);
+        
+        // Check for high price impact
+        if (quoteResponse.priceImpactPct && parseFloat(quoteResponse.priceImpactPct) > 1.0) {
+            console.log(formatWarning(`${icons.warning} High price impact detected: ${quoteResponse.priceImpactPct}%`));
+        }
         
         return quoteResponse;
     } catch (error) {
+        if (error.name === 'AbortError') {
+            console.error(formatError(`${icons.error} Request timeout when fetching quote`));
+            throw new Error('Quote request timed out');
+        }
+        
         console.error(formatError(`${icons.error} Error fetching quote: ${error.message}`));
+        console.error(formatError(`${icons.error} Error stack: ${error.stack}`));
         throw error;
     }
 }
@@ -270,6 +325,8 @@ async function getFeeAccountAndSwapTransaction(
     wallet
 ) {
     try {
+        devLog(`${icons.trade} Getting fee account and swap transaction`);
+        
         // Find fee account address
         const [feeAccount] = PublicKey.findProgramAddressSync(
             [
@@ -279,6 +336,8 @@ async function getFeeAccountAndSwapTransaction(
             ],
             REFERRAL_PROGRAM_ID
         );
+        
+        devLog(`${icons.info} Found fee account: ${feeAccount.toString()}`);
 
         // Prepare swap request
         const requestBody = {
@@ -288,24 +347,48 @@ async function getFeeAccountAndSwapTransaction(
             feeAccount: feeAccount.toString(),
             dynamicComputeUnitLimit: true
         };
-
+        
+        devLog(`${icons.trade} Preparing swap request with fee account`);
+        
+        // Log the public key being used in the request
+        devLog(`${icons.wallet} User public key: ${wallet.publicKey.toString().substring(0, 10)}...`);
+        
         // Get swap transaction
+        devLog(`${icons.network} Sending swap request to Jupiter API at ${BASE_SWAP_URL}/swap`);
+        
+        // Add timeout to the fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
         const response = await fetch(`${BASE_SWAP_URL}/swap`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(requestBody),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
-            throw new Error(`Error performing swap: ${response.status} ${response.statusText}`);
+            const errorText = await response.text();
+            devLog(`${icons.error} Jupiter API Error (${response.status}): ${errorText}`);
+            throw new Error(`Error performing swap: ${response.status} ${response.statusText} - ${errorText}`);
         }
 
         const { swapTransaction } = await response.json();
+        devLog(`${icons.success} Received swap transaction successfully (${swapTransaction.substring(0, 20)}...)`);
+        
+        // Validate transaction format
+        if (!swapTransaction || typeof swapTransaction !== 'string' || swapTransaction.length < 100) {
+            throw new Error(`Invalid swap transaction format: ${swapTransaction ? swapTransaction.substring(0, 30) + '...' : 'null or empty'}`);
+        }
+        
         return swapTransaction;
     } catch (error) {
         console.error(formatError(`${icons.error} Failed to get fee account and swap transaction: ${error.message}`));
+        console.error(formatError(`${icons.error} Error stack: ${error.stack}`));
         return null;
     }
 }

@@ -9,11 +9,10 @@ const Position = require('./Position');
 const OrderBook = require('./orderBook');
 const { 
     executeSwap, 
-    executeExactOutSwap, 
     updatePortfolioBalances,
     updatePositionFromSwap, 
     logPositionUpdate, 
-    cancelPendingBundle, 
+    cancelJupiterTransactions,
     calculateTradeAmount,
     BASE_TOKEN,
     QUOTE_TOKEN
@@ -241,37 +240,34 @@ async function checkAndCloseOpposingTrade(sentiment, currentPrice) {
         try {
             const baseToken = getBaseToken();
             const quoteToken = getQuoteToken();
-            const isClosingBuy = oldestMatchingTrade.direction === 'sell';
             
-            const exactOutAmount = isClosingBuy ? 
-                Math.floor(oldestMatchingTrade.baseTokenAmount * Math.pow(10, baseToken.DECIMALS)) :
-                Math.floor(oldestMatchingTrade.quoteTokenValue * Math.pow(10, quoteToken.DECIMALS));
-
             console.log(formatInfo(
                 `${icons.trade} CLOSING TRADE DETAILS:`
             ));
-            console.log(`  ${isClosingBuy ? styles.positive + 'Direction: Buy' + colours.reset : styles.negative + 'Direction: Sell' + colours.reset}`);
+            console.log(`  ${oldestMatchingTrade.direction === 'buy' ? styles.positive + 'Direction: Buy' + colours.reset : styles.negative + 'Direction: Sell' + colours.reset}`);
             console.log(`  ${formatBalance(oldestMatchingTrade.baseTokenAmount, baseToken.NAME)} @ ${formatPrice(currentPrice)}`);
             console.log(`  Quote value: ${formatBalance(oldestMatchingTrade.quoteTokenValue, quoteToken.NAME)}`);
             
             // Calculate potential profit
-            const potentialProfit = isClosingBuy ? 
-                (oldestMatchingTrade.price - currentPrice) * oldestMatchingTrade.baseTokenAmount :
-                (currentPrice - oldestMatchingTrade.price) * oldestMatchingTrade.baseTokenAmount;
+            const potentialProfit = oldestMatchingTrade.direction === 'buy' ? 
+                (currentPrice - oldestMatchingTrade.price) * oldestMatchingTrade.baseTokenAmount :
+                (oldestMatchingTrade.price - currentPrice) * oldestMatchingTrade.baseTokenAmount;
                 
             if (potentialProfit > 0) {
                 console.log(`  ${styles.positive}Potential Profit: ${formatPrice(potentialProfit)}${colours.reset}`);
                 console.log(`  ${styles.info}10% Fee: ${formatPrice(potentialProfit * 0.1)}${colours.reset}`);
             }
             
-            // Execute the swap to close the position - now passing trade and currentPrice
-            const swapResult = await executeExactOutSwap(
+            // Execute the swap to close the position with the consolidated executeSwap
+            const swapResult = await executeSwap(
                 wallet,
-                isClosingBuy ? baseToken.ADDRESS : quoteToken.ADDRESS,
-                exactOutAmount,
-                isClosingBuy ? quoteToken.ADDRESS : baseToken.ADDRESS,
-                oldestMatchingTrade, // Pass the trade object
-                currentPrice          // Pass the current price
+                sentiment,
+                null, // No manual trade amount
+                {
+                    isClosingPosition: true,
+                    trade: oldestMatchingTrade,
+                    currentPrice: currentPrice
+                }
             );
 
             if (swapResult) {
@@ -360,8 +356,13 @@ async function executeOpeningTrade(sentiment) {
             }
     
             console.log(formatInfo(`${icons.trade} OPENING: Placing ${isBuying ? styles.positive + 'Buy' + colours.reset : styles.negative + 'Sell' + colours.reset} Trade...`));
-            // Pass the actual token objects to executeSwap
-            const swapResult = await executeSwap(wallet, sentiment);
+            
+            // Execute trade using the consolidated executeSwap function
+            const swapResult = await executeSwap(
+                wallet,
+                sentiment,
+                null // Use calculated trade amount
+            );
             
             if (swapResult === 'cooldownfail' || swapResult === 'fgichangefail') {
                 // Don't retry for these conditions
@@ -452,7 +453,7 @@ async function executeThresholdStrategyTrade(fearGreedIndex, currentPrice, walle
             return null;
         }
         
-        // Get current allocations
+        // Get current allocations - IMPORTANT: Use full balances
         const currentAllocations = thresholdStrategy.getCurrentAllocations(
             wallet.baseBalance, 
             wallet.quoteBalance, 
@@ -471,6 +472,16 @@ async function executeThresholdStrategyTrade(fearGreedIndex, currentPrice, walle
             thresholdSettings.ALLOCATION_PERCENTAGE
         );
         
+        // Log target allocation details for debugging
+        console.log("Target Allocation Calculation:");
+        console.log(`- Portfolio Value: ${currentAllocations.totalValue.toFixed(2)}`);
+        console.log(`- Current Price: ${currentPrice.toFixed(2)}`);
+        console.log(`- Target ${baseToken.NAME} %: ${targetAllocations.baseToken.percentage.toFixed(2)}%`);
+        console.log(`- Target ${quoteToken.NAME} %: ${targetAllocations.quoteToken.percentage.toFixed(2)}%`);
+        console.log(`- Target ${baseToken.NAME} Value: ${targetAllocations.baseToken.value.toFixed(2)}`);
+        console.log(`- Target ${quoteToken.NAME} Value: ${targetAllocations.quoteToken.value.toFixed(2)}`);
+        console.log(`- Target ${baseToken.NAME} Tokens: ${targetAllocations.baseToken.tokens.toFixed(6)}`);
+        
         // Calculate trade needed for rebalance
         const tradeParams = thresholdStrategy.calculateRebalanceTrade(
             currentAllocations,
@@ -486,16 +497,51 @@ async function executeThresholdStrategyTrade(fearGreedIndex, currentPrice, walle
         // Execute the trade
         console.log(formatInfo(`${icons.trade} Executing ${tradeParams.type} trade: ${Math.abs(tradeParams.baseTokenChange).toFixed(6)} ${baseToken.NAME}`));
         
-        // Use the existing swap execution logic
-        const swapResult = await executeSwap(wallet, tradeParams.isBuyingBase ? "EXTREME_FEAR" : "EXTREME_GREED");
+        let swapResult;
+        
+        // Calculate the appropriate trade amount
+        const tradeAmount = tradeParams.isBuyingBase ? 
+            Math.abs(tradeParams.quoteTokenChange) : // If buying SOL, spend this much USDC
+            Math.abs(tradeParams.baseTokenChange);   // If selling SOL, spend this much SOL
+        
+        // Call executeSwap with the manual trade amount and sentiment
+        swapResult = await executeSwap(
+            wallet, 
+            tradeParams.isBuyingBase ? "EXTREME_FEAR" : "EXTREME_GREED",
+            tradeAmount // Pass the threshold-calculated amount directly
+        );
         
         if (swapResult && typeof swapResult === 'object') {
             console.log(formatSuccess(`${icons.success} Rebalance trade executed successfully`));
             
+            // Find and close open trades in the opposite direction
+            if (thresholdState.inHighAllocation !== null) {
+                const currentDirection = shouldAllocateHighSOL ? "buy" : "sell";
+                const previousDirection = shouldAllocateHighSOL ? "sell" : "buy";
+                
+                console.log(formatInfo(`${icons.close} Looking for open trades in ${previousDirection} direction to close`));
+                
+                // Get all open trades in the opposite direction
+                const openTrades = orderBook.getOpenTrades().filter(trade => trade.direction === previousDirection);
+                
+                if (openTrades.length > 0) {
+                    console.log(formatInfo(`${icons.close} Found ${openTrades.length} open ${previousDirection} positions to close`));
+                    
+                    // Close all open trades in the opposite direction
+                    for (const trade of openTrades) {
+                        console.log(formatInfo(`${icons.close} Closing trade ${trade.id.substring(0, 10)}... at price ${formatPrice(swapResult.price)}`));
+                        orderBook.closeTrade(trade.id, swapResult.price);
+                    }
+                } else {
+                    console.log(formatInfo(`${icons.info} No open ${previousDirection} trades found to close`));
+                }
+            }
+            
             // Update the allocation state after successful trade
             thresholdStrategy.updateAllocationState(shouldAllocateHighSOL);
             
-            // Add trade to orderbook
+            // Add the new trade to orderbook
+            console.log(formatInfo(`${icons.open} Recording new ${shouldAllocateHighSOL ? "buy" : "sell"} position in orderbook`));
             orderBook.addTrade(
                 swapResult.price,
                 swapResult.baseTokenChange,
@@ -768,7 +814,6 @@ async function main() {
                     THRESHOLD: 50,
                     ALLOCATION_PERCENTAGE: 95,
                     SWITCH_DELAY: 1,
-                    FEE_PERCENTAGE: 0.001,
                     MIN_TRADE_AMOUNT: 0.00001
                 };
                 
@@ -1035,7 +1080,7 @@ async function resetPosition() {
 
         // Cancel any pending transactions
         console.log(formatInfo(`${icons.warning} Cancelling any pending transactions...`));
-        cancelPendingBundle();
+        cancelJupiterTransactions();
 
         if (!wallet || !connection) {
             throw new Error("Wallet or connection is not initialised in resetPosition");
@@ -1203,7 +1248,7 @@ async function handleRestartTrading() {
 
         // Cancel any pending transactions
         console.log(formatInfo(`${icons.warning} Cancelling pending transactions...`));
-        cancelPendingBundle();
+        cancelJupiterTransactions();
 
         // Signal the current execution to stop
         console.log(formatInfo(`${icons.warning} Stopping current execution...`));

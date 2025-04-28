@@ -1,6 +1,6 @@
 /**
  * PulseSurfer Trading Module
- * Handles swap execution, bundle creation, and position management
+ * Handles swap execution, position management, and Jupiter ULTRA integration
  */
 
 // Core dependencies
@@ -9,6 +9,7 @@ const {
     getFeeAccountAndSwapTransaction, 
     BASE_SWAP_URL, 
     fetchFearGreedIndex, 
+    fetchPrice,
     isFGIChangeSignificant 
 } = require('./api');
 const { getWallet, getConnection } = require('./globalState');
@@ -71,29 +72,749 @@ const QUOTE_TOKEN = getQuoteToken();
 
 // Transaction-related constants
 const TRANSACTION_TIMEOUT = 120000; // 2 minutes
-const MAX_BUNDLE_RETRIES = 5;
-const BUNDLE_RETRY_DELAY = 2000; // 2 seconds
-const MAX_BUNDLE_CONFIRMATION_RETRIES = 60; // 2 minutes with 2s intervals
+const MAX_REQUEST_RETRIES = 3;
+const REQUEST_RETRY_DELAY = 2000; // 2 seconds
 const STATUS_CHECK_INTERVAL = 2000; // 2 seconds
-const DEFAULT_TIP = 0.0004; // 0.0004 SOL
 
-// Jito MEV configuration
-const JitoBlockEngine = "https://mainnet.block-engine.jito.wtf/api/v1/bundles";
-const TIP_ACCOUNTS = [
-    "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
-    "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
-    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
-    "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
-    "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
-    "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
-    "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
-    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
-];
-const maxJitoTip = 0.0004; // Cap for Jito tip
+// Jupiter ULTRA configuration
+const JUPITER_ULTRA_ORDER_URL = 'https://lite-api.jup.ag/ultra/v1/order';
+const JUPITER_ULTRA_EXECUTE_URL = 'https://lite-api.jup.ag/ultra/v1/execute';
 
 // State tracking
 const lastTradeTime = new Map();
-let isBundleCancelled = false;
+
+// ===========================
+// Jupiter ULTRA API Functions
+// ===========================
+
+/**
+ * Gets a swap order from Jupiter ULTRA API
+ * @param {string} inputMint - Input token mint address
+ * @param {string} outputMint - Output token mint address
+ * @param {string|number} amount - Amount to swap (in smallest units)
+ * @param {string} takerAddress - Wallet address of the taker
+ * @param {Object} options - Additional options (slippage, referral, etc.)
+ * @returns {Promise<Object>} Order response
+ */
+async function getJupiterUltraOrder(inputMint, outputMint, amount, takerAddress, options = {}) {
+    try {
+        // Add fee settings
+        const settings = readSettings();
+        const developerTipPercentage = settings.DEVELOPER_TIP_PERCENTAGE || 0;
+        const developerFeeBps = Math.round(developerTipPercentage * 100);
+        
+        // Default fee is 50 bps (0.5%) - minimum allowed by Jupiter
+        const DEFAULT_FEE_BPS = 50;
+        
+        // Calculate final fee (capped between 50-255 bps as required by Jupiter)
+        const referralFeeBps = Math.max(Math.min(DEFAULT_FEE_BPS + developerFeeBps, 255), 50);
+        
+        // Your fee wallet address
+        const DEVELOPER_FEE_ADDRESS = "EVDjScHdbxkF2tX2msNqDweL1DnhrRr2vPyfFoSKDZUM";
+        
+        // Build base URL parameters
+        const params = new URLSearchParams({
+            inputMint,
+            outputMint,
+            amount: amount.toString(),
+            taker: takerAddress,
+            // Add fee parameters
+            referralAccount: DEVELOPER_FEE_ADDRESS,
+            referralFee: referralFeeBps.toString()
+        });
+
+        // Add optional parameters if provided
+        if (options.slippageBps) {
+            params.append('slippageBps', options.slippageBps.toString());
+        }
+        
+        if (options.swapMode) {
+            // Note: Even though we set swapMode, Jupiter ULTRA only supports ExactIn
+            params.append('swapMode', 'ExactIn'); // Force ExactIn for ULTRA
+        }
+        
+        // Only add custom referral parameters if provided (otherwise use our default)
+        if (options.referralAccount) {
+            // Override our default referral account if specified
+            params.set('referralAccount', options.referralAccount);
+        }
+        
+        if (options.referralFee) {
+            // Override our default referral fee if specified
+            params.set('referralFee', options.referralFee.toString());
+        }
+
+        // Add timeout to fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TRANSACTION_TIMEOUT);
+        
+        devLog(`Getting Jupiter ULTRA order: ${JUPITER_ULTRA_ORDER_URL}?${params.toString()}`);
+        devLog(`Referral fee being applied: ${referralFeeBps} bps (${referralFeeBps/100}%)`);
+        
+        const response = await fetch(`${JUPITER_ULTRA_ORDER_URL}?${params.toString()}`, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error(`Failed to get Jupiter ULTRA order: ${response.status} ${response.statusText}`);
+        }
+
+        const orderResponse = await response.json();
+        
+        // Log fee information if present in response
+        if (orderResponse.feeBps) {
+            devLog(`Fee confirmed in response: ${orderResponse.feeBps} bps (${orderResponse.feeBps/100}%)`);
+            if (orderResponse.feeMint) {
+                devLog(`Fee being collected in token: ${orderResponse.feeMint}`);
+            }
+        }
+        
+        devLog('Jupiter ULTRA order response:', orderResponse);
+
+        return orderResponse;
+    } catch (error) {
+        console.error(formatError(`Error getting Jupiter ULTRA order: ${error.message}`));
+        throw error;
+    }
+}
+
+/**
+ * Executes a signed transaction through Jupiter ULTRA API with improved error handling
+ * @param {string} signedTransaction - Base64 encoded signed transaction
+ * @param {string} requestId - Request ID from the order response
+ * @returns {Promise<Object>} Execution response
+ */
+async function executeJupiterUltraOrder(signedTransaction, requestId) {
+    try {
+        let retries = 0;
+        let response;
+        let lastError = null;
+
+        // Implement retry logic
+        while (retries < MAX_REQUEST_RETRIES) {
+            try {
+                // Add timeout to fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), TRANSACTION_TIMEOUT);
+                
+                devLog(`Executing Jupiter ULTRA order: ${requestId} (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})`);
+                console.log(formatInfo(`${icons.network} Sending request to Jupiter ULTRA API (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                
+                response = await fetch(JUPITER_ULTRA_EXECUTE_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        signedTransaction,
+                        requestId
+                    }),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                // Handle successful response
+                if (response.ok) {
+                    const responseData = await response.json();
+                    
+                    // Log the full response for debugging
+                    devLog('Jupiter ULTRA execute response:', responseData);
+                    
+                    // Check the status field - Jupiter ULTRA returns a status field in the response
+                    if (responseData.status === 'Failed') {
+                        const errorMessage = responseData.error || 'Unknown error';
+                        const errorCode = responseData.code || 'N/A';
+                        
+                        console.error(formatError(`${icons.error} Jupiter API returned failure status: ${errorMessage}`));
+                        console.error(formatError(`Error code: ${errorCode}`));
+                        
+                        // Determine if this error is retryable
+                        const nonRetryable = isNonRetryableError(errorCode, errorMessage);
+                        
+                        // If this is a known error that cannot be fixed by retrying, return the response
+                        if (nonRetryable) {
+                            console.log(formatWarning(`${icons.warning} This error cannot be fixed by retrying. Returning the error response.`));
+                            return responseData;
+                        }
+                        
+                        // For retryable errors, attempt retry if we haven't exhausted retries
+                        retries++;
+                        if (retries < MAX_REQUEST_RETRIES) {
+                            const waitTime = calculateBackoffTime(retries);
+                            console.log(formatWarning(`${icons.wait} Retrying in ${waitTime/1000} seconds (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                            await new Promise(resolve => setTimeout(resolve, waitTime));
+                            continue;
+                        } else {
+                            // We've exhausted retries
+                            console.error(formatError(`${icons.error} Failed after ${MAX_REQUEST_RETRIES} attempts. Returning error response.`));
+                            return responseData;
+                        }
+                    } else if (responseData.status === 'Success') {
+                        // Success - return the data with full swap events
+                        console.log(formatSuccess(`${icons.success} Jupiter ULTRA transaction successful`));
+                        console.log(formatInfo(`${icons.info} Transaction signature: ${responseData.signature}`));
+                        return responseData;
+                    } else {
+                        // Unexpected status value
+                        console.error(formatError(`${icons.error} Unexpected status in Jupiter response: ${responseData.status}`));
+                        
+                        // Try to retry if we haven't exhausted retries
+                        retries++;
+                        if (retries < MAX_REQUEST_RETRIES) {
+                            const waitTime = calculateBackoffTime(retries);
+                            console.log(formatWarning(`${icons.wait} Retrying in ${waitTime/1000} seconds (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                            await new Promise(resolve => setTimeout(resolve, waitTime));
+                            continue;
+                        } else {
+                            // We've exhausted retries
+                            return responseData;
+                        }
+                    }
+                }
+                
+                // Handle HTTP error responses
+                const responseText = await response.text();
+                devLog(`Response status: ${response.status}`);
+                devLog("Response body:", responseText);
+                
+                // Parse the response text if possible
+                let parsedError;
+                try {
+                    parsedError = JSON.parse(responseText);
+                } catch (e) {
+                    parsedError = { error: responseText };
+                }
+                
+                lastError = new Error(`HTTP ${response.status}: ${parsedError.error || responseText}`);
+                
+                // Implement specific handling for different status codes
+                if (response.status === 429) {
+                    // Rate limiting - use exponential backoff
+                    console.error(formatError(`${icons.error} Rate limit exceeded (429). Implementing backoff...`));
+                    retries++;
+                    if (retries < MAX_REQUEST_RETRIES) {
+                        const waitTime = calculateBackoffTime(retries, true); // true for rate limiting
+                        console.log(formatWarning(`${icons.wait} Rate limited. Retrying in ${waitTime/1000} seconds (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    } else {
+                        throw new Error(`Maximum retries exceeded for rate limiting (429)`);
+                    }
+                } else if (response.status >= 500) {
+                    // Server error - retry with backoff
+                    console.error(formatError(`${icons.error} Server error (${response.status}). Retrying...`));
+                    retries++;
+                    if (retries < MAX_REQUEST_RETRIES) {
+                        const waitTime = calculateBackoffTime(retries);
+                        console.log(formatWarning(`${icons.wait} Server error. Retrying in ${waitTime/1000} seconds (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    } else {
+                        throw new Error(`Maximum retries exceeded for server error (${response.status})`);
+                    }
+                } else if (response.status === 400) {
+                    // Bad request - check the error type
+                    console.error(formatError(`${icons.error} Bad request (400): ${parsedError.error || 'Unknown error'}`));
+                    
+                    // Some 400 errors might be retriable
+                    if (isRetriableBadRequest(parsedError)) {
+                        retries++;
+                        if (retries < MAX_REQUEST_RETRIES) {
+                            const waitTime = calculateBackoffTime(retries);
+                            console.log(formatWarning(`${icons.wait} Retriable bad request. Retrying in ${waitTime/1000} seconds (Attempt ${retries + 1}/${MAX_REQUEST_RETRIES})...`));
+                            await new Promise(resolve => setTimeout(resolve, waitTime));
+                        } else {
+                            throw new Error(`Maximum retries exceeded for bad request (400)`);
+                        }
+                    } else {
+                        // Non-retriable bad request, throw error immediately
+                        throw new Error(`Bad request (400): ${parsedError.error || 'Unknown error'}`);
+                    }
+                } else {
+                    // Other status codes - probably not retriable
+                    throw new Error(`Failed to execute Jupiter ULTRA order: ${response.status} ${responseText}`);
+                }
+            } catch (error) {
+                // Handle network or timeout errors
+                if (error.name === 'AbortError') {
+                    lastError = new Error('Jupiter ULTRA execute request timed out');
+                    console.error(formatError(`${icons.error} Request timed out after ${TRANSACTION_TIMEOUT/1000} seconds`));
+                } else {
+                    lastError = error;
+                    console.error(formatError(`${icons.error} Error executing request: ${error.message}`));
+                }
+                
+                retries++;
+                if (retries >= MAX_REQUEST_RETRIES) {
+                    throw lastError;
+                }
+                
+                const waitTime = calculateBackoffTime(retries);
+                console.log(formatWarning(`${icons.wait} Error during attempt ${retries}. Retrying in ${waitTime/1000} seconds...`));
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+
+        // We should never reach here due to the retry logic, but just in case
+        throw lastError || new Error(`Failed to execute Jupiter ULTRA order after ${MAX_REQUEST_RETRIES} attempts`);
+    } catch (error) {
+        console.error(formatError(`${icons.error} Error executing Jupiter ULTRA order: ${error.message}`));
+        
+        // Return a structured error response
+        return {
+            status: 'Failed',
+            error: error.message,
+            code: error.code || 'UNKNOWN_ERROR',
+            requestId: requestId
+        };
+    }
+}
+
+/**
+ * No-op function that replaces cancelPendingBundle
+ * Jupiter ULTRA doesn't need cancellation as transactions are handled by the API
+ */
+function cancelJupiterTransactions() {
+    // Jupiter ULTRA doesn't need cancellation as transactions are handled by the API
+    console.log(formatInfo(`${icons.info} Jupiter ULTRA transactions don't require cancellation`));
+}
+
+/**
+ * Calculate backoff time with exponential increase
+ * @param {number} retryCount - Current retry attempt (1-based)
+ * @param {boolean} isRateLimited - Whether this is for rate limiting
+ * @returns {number} - Delay in milliseconds
+ */
+function calculateBackoffTime(retryCount, isRateLimited = false) {
+    // Base delay (3 seconds for regular errors, 5 seconds for rate limiting)
+    const baseDelay = isRateLimited ? 5000 : 3000;
+    
+    // Add jitter to avoid thundering herd problem (±20%)
+    const jitter = 0.8 + (Math.random() * 0.4);
+    
+    // Calculate exponential backoff: baseDelay * 2^(retryCount-1) * jitter
+    return Math.min(
+        baseDelay * Math.pow(2, retryCount - 1) * jitter,
+        60000 // Cap at 60 seconds
+    );
+}
+
+/**
+ * Check if an error code or message indicates a non-retryable error
+ * @param {string|number} errorCode - Error code
+ * @param {string} errorMessage - Error message
+ * @returns {boolean} - True if error should not be retried
+ */
+function isNonRetryableError(errorCode, errorMessage) {
+    // Define error codes and messages that should not be retried
+    const nonRetryableCodes = [
+        6000, // #6000 - custom program error, typically means contract logic rejection
+        4001, // User rejected the transaction
+        4100, // Unauthorized
+        4200, // The request was denied
+    ];
+    
+    // Check if error code is in non-retryable list
+    if (nonRetryableCodes.includes(Number(errorCode))) {
+        return true;
+    }
+    
+    // Check for specific error messages that indicate non-retryable conditions
+    const nonRetryableMessages = [
+        'insufficient funds',
+        'account has insufficient funds',
+        'invalid signature',
+        'invalid account',
+        'unauthorized',
+        'token account not found',
+        'account not found',
+        'instruction failed',
+        'route unavailable'
+    ];
+    
+    // Check if error message contains any non-retryable phrases
+    if (errorMessage && typeof errorMessage === 'string') {
+        return nonRetryableMessages.some(phrase => 
+            errorMessage.toLowerCase().includes(phrase.toLowerCase())
+        );
+    }
+    
+    return false;
+}
+
+/**
+ * Check if a bad request error is retriable
+ * @param {Object} error - Error response object
+ * @returns {boolean} - True if error should be retried
+ */
+function isRetriableBadRequest(error) {
+    // Some bad requests might be temporary issues
+    const retriableErrorMessages = [
+        'timeout',
+        'temporary',
+        'try again',
+        'busy',
+        'overloaded',
+        'maintenance'
+    ];
+    
+    if (error && error.error && typeof error.error === 'string') {
+        return retriableErrorMessages.some(phrase => 
+            error.error.toLowerCase().includes(phrase.toLowerCase())
+        );
+    }
+    
+    return false;
+}
+
+// ===========================
+// Swap Function
+// ===========================
+
+/**
+ * Enhanced executeSwap function that handles both opening and closing positions
+ * using only Jupiter ULTRA's ExactIn method with verification for position closing
+ * 
+ * @param {Object} wallet - Wallet object
+ * @param {string} sentiment - Market sentiment
+ * @param {number|null} manualTradeAmount - Optional direct trade amount in token units (not smallest units)
+ * @param {Object|null} closingInfo - Information for position closing: {isClosingPosition, trade, currentPrice}
+ * @returns {Promise<Object|string|null>} Swap result, failure reason, or null
+ */
+async function executeSwap(wallet, sentiment, manualTradeAmount = null, closingInfo = null) {
+    const settings = readSettings();
+    if (!settings) {
+        console.error(formatError('Failed to read settings'));
+        return null;
+    }
+
+    const baseToken = getBaseToken();
+    const quoteToken = getQuoteToken();
+    
+    let tradeAmount;
+    let isBuying;
+    let inputMint;
+    let outputMint;
+    let marketPrice = null;
+
+    try {
+        devLog("Initiating swap with sentiment:", sentiment);
+        
+        // Check if we need current price for calculations
+        if (closingInfo && closingInfo.isClosingPosition) {
+            if (closingInfo.currentPrice) {
+                marketPrice = closingInfo.currentPrice;
+                devLog(`Using provided currentPrice for closing position: ${marketPrice}`);
+            } else {
+                try {
+                    marketPrice = await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
+                    closingInfo.currentPrice = marketPrice;
+                    console.log(formatInfo(`${icons.price} Fetched current price for closing position: ${formatPrice(marketPrice)}`));
+                } catch (priceError) {
+                    console.error(formatError(`Error fetching price for closing position: ${priceError.message}`));
+                    return null;
+                }
+            }
+        } else {
+            // Always fetch the current market price for recording the trade accurately
+            try {
+                marketPrice = await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
+                devLog(`Fetched current market price: ${marketPrice}`);
+            } catch (priceError) {
+                console.error(formatError(`Error fetching market price: ${priceError.message}`));
+                // Continue with the trade - we'll try to fetch the price again later if needed
+            }
+        }
+
+        // Determine trade direction based on sentiment
+        isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
+        
+        // If closing position, override direction based on trade
+        if (closingInfo && closingInfo.isClosingPosition && closingInfo.trade) {
+            // Reverse the direction when closing a position
+            isBuying = closingInfo.trade.direction === 'sell';
+            console.log(formatInfo(`${icons.close} Closing ${closingInfo.trade.direction} position with ${isBuying ? 'buy' : 'sell'} operation`));
+        }
+        
+        inputMint = isBuying ? quoteToken.ADDRESS : baseToken.ADDRESS;
+        outputMint = isBuying ? baseToken.ADDRESS : quoteToken.ADDRESS;
+        const tokenInfo = isBuying ? quoteToken : baseToken;
+        const balance = isBuying ? wallet.quoteBalance : wallet.baseBalance;
+
+        // Calculate trade amount based on different scenarios
+        if (manualTradeAmount !== null) {
+            // Manual amount provided (used by threshold mode)
+            console.log(formatInfo(`${icons.trade} Using provided trade amount: ${manualTradeAmount} ${tokenInfo.NAME}`));
+            tradeAmount = Math.floor(manualTradeAmount * Math.pow(10, tokenInfo.DECIMALS));
+            console.log(formatInfo(`${icons.balance} Amount in smallest units: ${tradeAmount}`));
+        } else if (closingInfo && closingInfo.isClosingPosition && closingInfo.trade) {
+            // Calculate amount needed to close the position
+            const trade = closingInfo.trade;
+            const currentPrice = closingInfo.currentPrice;
+            
+            console.log(formatInfo(`${icons.trade} Calculating amount to close position with entry price: ${formatPrice(trade.price)}`));
+            
+            // When closing a position, we want to trade the position's base token amount
+            // If we're buying, we need to calculate how much quote token is needed
+            if (isBuying) {
+                // Closing a sell position by buying base token
+                // Calculate how much input (quote token) is needed based on current price
+                const baseAmount = trade.baseTokenAmount;
+                const quoteNeeded = baseAmount * currentPrice * 1.01; // Add 1% buffer for slippage
+                
+                console.log(formatInfo(`${icons.balance} Position size: ${formatBalance(baseAmount, baseToken.NAME)}`));
+                console.log(formatInfo(`${icons.price} Estimated cost: ${formatPrice(quoteNeeded)}`));
+                
+                tradeAmount = Math.floor(quoteNeeded * Math.pow(10, quoteToken.DECIMALS));
+            } else {
+                // Closing a buy position by selling base token
+                const baseAmount = trade.baseTokenAmount;
+                console.log(formatInfo(`${icons.balance} Selling position size: ${formatBalance(baseAmount, baseToken.NAME)}`));
+                
+                tradeAmount = Math.floor(baseAmount * Math.pow(10, baseToken.DECIMALS));
+            }
+            
+            console.log(formatInfo(`${icons.balance} Calculated closing amount: ${tradeAmount / Math.pow(10, tokenInfo.DECIMALS)} ${tokenInfo.NAME}`));
+        } else {
+            // Standard sentiment-based trade amount calculation
+            tradeAmount = calculateTradeAmount(balance, sentiment, tokenInfo);
+            console.log(formatInfo(`${icons.balance} Calculated amount: ${tradeAmount / Math.pow(10, tokenInfo.DECIMALS)} ${tokenInfo.NAME}`));
+        }
+
+        if (!tradeAmount || tradeAmount <= 0) {
+            devLog('Invalid trade amount calculated');
+            return null;
+        }
+
+        devLog(`Using trade amount: ${tradeAmount} smallest units (${tradeAmount / Math.pow(10, tokenInfo.DECIMALS)} ${tokenInfo.NAME})`);
+
+        // Set options for Jupiter ULTRA with fixed 50bps fee
+        const ultraOptions = {
+            slippageBps: 50, // Default slippage of 0.5%
+            swapMode: 'ExactIn' // Jupiter ULTRA only supports ExactIn
+        };
+
+        // Step 1: Get order from Jupiter ULTRA API
+        console.log(formatInfo(`${icons.info} Preparing Jupiter ULTRA swap...`));
+        const orderResponse = await getJupiterUltraOrder(
+            inputMint,
+            outputMint,
+            tradeAmount,
+            wallet.publicKey.toString(),
+            ultraOptions
+        );
+
+        if (!orderResponse || !orderResponse.transaction) {
+            console.error(formatError(`Invalid order response from Jupiter ULTRA`));
+            
+            // Log failed trade
+            logTradeToFile({
+                inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
+                outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
+                inputAmount: tradeAmount ? (tradeAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS))).toFixed(6) : '0',
+                outputAmount: '0',
+                jupiterStatus: 'Failed'
+            });
+            
+            return null;
+        }
+
+        // Step 2: Sign the transaction
+        const transactionBuf = Buffer.from(orderResponse.transaction, 'base64');
+        const transaction = VersionedTransaction.deserialize(transactionBuf);
+        
+        if (!transaction) {
+            console.error(formatError(`Failed to deserialize transaction`));
+            return null;
+        }
+        
+        transaction.sign([wallet.payer]);
+        const signedTransaction = Buffer.from(transaction.serialize()).toString('base64');
+
+        // Step 3: Execute the order
+        console.log(formatInfo(`${icons.wait} Executing swap through Jupiter ULTRA...`));
+        const executeResponse = await executeJupiterUltraOrder(signedTransaction, orderResponse.requestId);
+
+        if (executeResponse.status !== 'Success') {
+            console.error(formatError(`${icons.error} Swap failed: ${executeResponse.error || 'Unknown error'}`));
+            console.error(formatError(`Error code: ${executeResponse.code}`));
+            
+            // Log failed trade
+            logTradeToFile({
+                inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
+                outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
+                inputAmount: tradeAmount ? (tradeAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS))).toFixed(6) : '0',
+                outputAmount: '0',
+                jupiterStatus: 'Failed'
+            });
+            
+            return null;
+        }
+
+        console.log(formatInfo(`${icons.info} Updating Trade Information...`));
+        
+        // Parse amounts from the swap events - UPDATED to use total amounts
+        let inputAmount = 0, outputAmount = 0;
+
+        // Use totalInputAmount and totalOutputAmount fields directly
+        if (executeResponse.totalInputAmount && executeResponse.totalOutputAmount) {
+            // Use the total amounts, which include all swap events and fees
+            inputAmount = parseFloat(executeResponse.totalInputAmount) / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS));
+            outputAmount = parseFloat(executeResponse.totalOutputAmount) / (10 ** (isBuying ? baseToken.DECIMALS : quoteToken.DECIMALS));
+            console.log(formatInfo(`${icons.trade} Total trade amounts: ${formatBalance(inputAmount, isBuying ? quoteToken.NAME : baseToken.NAME)} → ${formatBalance(outputAmount, isBuying ? baseToken.NAME : quoteToken.NAME)}`));
+            
+            // For visibility, also log the number of liquidity pools used
+            if (executeResponse.swapEvents && executeResponse.swapEvents.length > 0) {
+                console.log(formatInfo(`${icons.info} Trade routed through ${executeResponse.swapEvents.length} liquidity pools`));
+            }
+        } else if (executeResponse.swapEvents && executeResponse.swapEvents.length > 0) {
+            // Fallback to summing up the individual swap events if total fields aren't available
+            let totalInputAmount = 0;
+            let totalOutputAmount = 0;
+            
+            console.log(formatInfo(`${icons.info} Trade routed through ${executeResponse.swapEvents.length} liquidity pools`));
+            
+            // Sum up all swap events
+            executeResponse.swapEvents.forEach((swapEvent, index) => {
+                const eventInputAmount = parseFloat(swapEvent.inputAmount) / (10 ** (swapEvent.inputMint === baseToken.ADDRESS ? baseToken.DECIMALS : quoteToken.DECIMALS));
+                const eventOutputAmount = parseFloat(swapEvent.outputAmount) / (10 ** (swapEvent.outputMint === baseToken.ADDRESS ? baseToken.DECIMALS : quoteToken.DECIMALS));
+                
+                console.log(formatInfo(`${icons.trade} Pool ${index + 1}: ${formatBalance(eventInputAmount, swapEvent.inputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME)} → ${formatBalance(eventOutputAmount, swapEvent.outputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME)}`));
+                
+                // Only count events that match our expected direction
+                if ((isBuying && swapEvent.outputMint === baseToken.ADDRESS) || 
+                    (!isBuying && swapEvent.inputMint === baseToken.ADDRESS)) {
+                    totalInputAmount += parseFloat(swapEvent.inputAmount);
+                    totalOutputAmount += parseFloat(swapEvent.outputAmount);
+                }
+            });
+            
+            inputAmount = totalInputAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS));
+            outputAmount = totalOutputAmount / (10 ** (isBuying ? baseToken.DECIMALS : quoteToken.DECIMALS));
+        } else {
+            // Fallback to result amounts as last resort
+            inputAmount = parseFloat(executeResponse.inputAmountResult) / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS));
+            outputAmount = parseFloat(executeResponse.outputAmountResult) / (10 ** (isBuying ? baseToken.DECIMALS : quoteToken.DECIMALS));
+            console.log(formatWarning(`${icons.warning} Using result amounts: ${formatBalance(inputAmount, isBuying ? quoteToken.NAME : baseToken.NAME)} → ${formatBalance(outputAmount, isBuying ? baseToken.NAME : quoteToken.NAME)}`));
+        }
+
+        // Log the trade
+        logTradeToFile({
+            inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
+            outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
+            inputAmount: inputAmount.toFixed(6),
+            outputAmount: outputAmount.toFixed(6),
+            jupiterStatus: 'Success'
+        });
+
+        // Calculate token changes using token-agnostic approach
+        const baseTokenChange = isBuying ? outputAmount : -inputAmount;
+        const quoteTokenChange = isBuying ? -inputAmount : outputAmount;
+        
+        // PRICE FIX: Use the market price we already fetched instead of calculating from the swap amounts
+        let calculatedPrice;
+        
+        // If we have the market price from earlier, use it
+        if (marketPrice) {
+            calculatedPrice = marketPrice;
+        } 
+        // If we're closing a position and have currentPrice, use that
+        else if (closingInfo && closingInfo.currentPrice) {
+            calculatedPrice = closingInfo.currentPrice;
+        } 
+        // Otherwise, fetch it now
+        else {
+            try {
+                calculatedPrice = await fetchPrice(BASE_PRICE_URL, baseToken.ADDRESS);
+                console.log(formatInfo(`${icons.price} Fetched market price for trade: ${formatPrice(calculatedPrice)}`));
+            } catch (priceError) {
+                // As a last resort, calculate price from the trade amounts (not ideal)
+                calculatedPrice = Math.abs(quoteTokenChange / baseTokenChange);
+                console.log(formatWarning(`${icons.warning} Could not fetch market price, using calculated price: ${formatPrice(calculatedPrice)}`));
+            }
+        }
+
+        console.log(formatSuccess(`${icons.success} Trade Successful!`));
+        console.log(formatInfo(`${icons.info} Transaction ID: ${executeResponse.signature}`));
+        console.log(formatInfo(`${icons.info} Explorer URL: https://solscan.io/tx/${executeResponse.signature}`));
+        console.log(formatInfo(`${icons.price} Trade recorded at market price: ${formatPrice(calculatedPrice)}`));
+        
+        // If this was closing a position, verify if it was successful (closed at least 98.5%)
+        let verificationResult = null;
+        if (closingInfo && closingInfo.isClosingPosition && closingInfo.trade) {
+            // Calculate how much of the position was actually closed
+            const trade = closingInfo.trade;
+            const wasOriginallyBuy = trade.direction === 'buy';
+            
+            // Get actual closed amount
+            const actualBaseTokenClosed = Math.abs(baseTokenChange);
+            const targetBaseTokenAmount = trade.baseTokenAmount;
+            
+            // Calculate close percentage
+            const closePercentage = (actualBaseTokenClosed / targetBaseTokenAmount) * 100;
+            
+            console.log(formatInfo(`${icons.info} Position close verification:`));
+            console.log(`  - Target amount: ${targetBaseTokenAmount} ${baseToken.NAME}`);
+            console.log(`  - Actual closed: ${actualBaseTokenClosed} ${baseToken.NAME}`);
+            console.log(`  - Close percentage: ${closePercentage.toFixed(2)}%`);
+            
+            // As required: >98.5% = success
+            const isSuccessfulClose = closePercentage >= 98.5;
+            verificationResult = {
+                success: isSuccessfulClose,
+                fullyClose: isSuccessfulClose,
+                message: isSuccessfulClose
+                    ? `Position successfully closed (${closePercentage.toFixed(2)}%)`
+                    : `Position only partially closed (${closePercentage.toFixed(2)}%)`,
+                remainingAmount: isSuccessfulClose ? 0 : targetBaseTokenAmount - actualBaseTokenClosed,
+                closePercentage: closePercentage
+            };
+            
+            console.log(formatInfo(`${icons.info} ${verificationResult.message}`));
+        }
+        
+        lastTradeTime.set(wallet.publicKey.toString(), Date.now());
+        
+        // Return in a format compatible with existing code
+        return {
+            txId: executeResponse.signature,
+            price: calculatedPrice,  // Use the correct market price here
+            baseTokenChange,
+            quoteTokenChange,
+            appliedFeeBps: 0,  // No extra fees applied
+            jupiterUltra: true,
+            status: executeResponse.status,
+            signature: executeResponse.signature,
+            slot: executeResponse.slot,
+            requestId: orderResponse.requestId,
+            inAmount: orderResponse.inAmount,
+            outAmount: orderResponse.outAmount,
+            swapType: orderResponse.swapType,
+            slippageBps: orderResponse.slippageBps,
+            routePlan: orderResponse.routePlan,
+            // Include verification result if this was a position close
+            verificationResult
+        };
+
+    } catch (error) {
+        console.error(formatError(`Error executing swap: ${error.message}`));
+        
+        // Log failed trade
+        const baseToken = getBaseToken();
+        const quoteToken = getQuoteToken();
+        
+        logTradeToFile({
+            inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
+            outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
+            inputAmount: tradeAmount ? (tradeAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS))).toFixed(6) : '0',
+            outputAmount: '0',
+            jupiterStatus: 'Failed'
+        });
+
+        return null;
+    }
+}
 
 // ===========================
 // Trade Logging
@@ -111,7 +832,7 @@ function logTradeToFile(tradeData) {
             outputToken = '',
             inputAmount = 0,
             outputAmount = 0,
-            jitoStatus = 'Unknown'
+            jupiterStatus = 'Unknown'
         } = tradeData || {};
 
         // Create timestamp
@@ -119,7 +840,7 @@ function logTradeToFile(tradeData) {
         const timestamp = now.toISOString().replace('T', ' ').slice(0, 19);
 
         // Create CSV line with timestamp
-        const csvLine = `${timestamp},${inputToken},${outputToken},${inputAmount},${outputAmount},${jitoStatus}\n`;
+        const csvLine = `${timestamp},${inputToken},${outputToken},${inputAmount},${outputAmount},${jupiterStatus}\n`;
 
         // Get user folder path (two levels up from src directory)
         const userFolder = path.join(__dirname, '..', '..', 'user');
@@ -135,7 +856,7 @@ function logTradeToFile(tradeData) {
 
         // Create headers if file doesn't exist
         if (!fs.existsSync(filePath)) {
-            const headers = 'Timestamp,Input Token,Output Token,Input Amount,Output Amount,Jito Status\n';
+            const headers = 'Timestamp,Input Token,Output Token,Input Amount,Output Amount,Jupiter Status\n';
             fs.writeFileSync(filePath, headers);
         }
 
@@ -253,379 +974,6 @@ function calculateTradeAmount(balance, sentiment, tokenInfo) {
     } catch (error) {
         console.error(formatError(`Error calculating trade amount: ${error.message}`));
         return 0;
-    }
-}
-
-
-/**
- * Gets a random tip account from the tip accounts list
- * @returns {string} Random tip account public key
- */
-function getRandomTipAccount() {
-    return TIP_ACCOUNTS[Math.floor(Math.random() * TIP_ACCOUNTS.length)];
-}
-
-// ===========================
-// Jito Interactions
-// ===========================
-
-/**
- * Fetches the current Jito tip floor
- * @returns {Promise<number>} Current tip floor
- */
-async function jitoTipCheck() {
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 21000);
-        
-        const response = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', {
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (!Array.isArray(data) || !data[0] || data[0].ema_landed_tips_50th_percentile === null) {
-            throw new Error('Invalid tip floor data structure');
-        }
-
-        const emaPercentile50th = data[0].ema_landed_tips_50th_percentile;
-        devLog('Current Jito tip floor (50th EMA):', emaPercentile50th);
-        return emaPercentile50th;
-
-    } catch (error) {
-        console.error(formatError(`Error fetching Jito tip floor: ${error.message}`));
-        return DEFAULT_TIP; // Return default tip on error
-    }
-}
-
-/**
- * Cancels any pending Jito bundle
- */
-function cancelPendingBundle() {
-    isBundleCancelled = true;
-    devLog('Jito bundle cancelled by user');
-}
-
-/**
- * Sends a bundle to Jito Block Engine
- * @param {Array<VersionedTransaction>} bundletoSend - Array of transactions
- * @returns {Promise<string>} Bundle ID
- */
-async function sendJitoBundle(bundletoSend) {
-    // Validate input
-    if (!Array.isArray(bundletoSend) || bundletoSend.length === 0) {
-        throw new Error('Invalid bundle input');
-    }
-    
-    let encodedBundle;
-    try {
-        encodedBundle = bundletoSend.map((tx, index) => {
-            if (!(tx instanceof VersionedTransaction)) {
-                throw new Error(`Transaction at index ${index} is not a VersionedTransaction`);
-            }
-            const serialized = tx.serialize();
-            const encoded = bs58.default.encode(serialized);
-            return encoded;
-        });
-    } catch (error) {
-        console.error(formatError(`Error encoding transactions: ${error.message}`));
-        throw error;
-    }
-
-    const data = {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "sendBundle",
-        params: [encodedBundle]
-    };
-
-    devLog("Sending bundle to Jito Block Engine...");
-
-    let response;
-    for (let i = 0; i <= MAX_BUNDLE_RETRIES; i++) {
-        if (isBundleCancelled) {
-            throw new Error('Bundle cancelled by user');
-        }
-        
-        try {
-            // Add timeout to fetch
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
-            
-            response = await fetch(JitoBlockEngine, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(data),
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-                break;
-            }
-
-            const responseText = await response.text();
-            devLog(`Response status: ${response.status}`);
-            devLog("Response body:", responseText);
-
-            if (response.status === 400) {
-                console.error(formatError(`Bad Request Error: ${responseText}`));
-                throw new Error(`Bad Request: ${responseText}`);
-            }
-
-            if (response.status === 429) {
-                const waitTime = Math.min(500 * Math.pow(2, i), 5000);
-                const jitter = Math.random() * 0.3 * waitTime;
-                devLog(`Rate limited. Retrying in ${waitTime + jitter}ms...`);
-                await new Promise((resolve) => setTimeout(resolve, waitTime + jitter));
-            } else {
-                throw new Error(`Unexpected response status: ${response.status}`);
-            }
-        } catch (error) {
-            console.error(formatError(`Error on attempt ${i + 1}: ${error.message}`));
-            if (i === MAX_BUNDLE_RETRIES) {
-                console.error(formatError("Max retries exceeded"));
-                throw error;
-            }
-        }
-    }
-
-    if (!response || !response.ok) {
-        throw new Error(`Failed to send bundle after ${MAX_BUNDLE_RETRIES} attempts`);
-    }
-
-    const responseText = await response.text();
-
-    let responseData;
-    try {
-        responseData = JSON.parse(responseText);
-    } catch (error) {
-        console.error(formatError(`Error parsing Jito response: ${error.message}`));
-        throw new Error("Failed to parse Jito response");
-    }
-
-    if (responseData.error) {
-        console.error(formatError(`Jito Block Engine returned an error: ${responseData.error.message}`));
-        throw new Error(`Jito error: ${responseData.error.message}`);
-    }
-
-    const result = responseData.result;
-    if (!result) {
-        console.error(formatError("No result in Jito response"));
-        throw new Error("No result in Jito response");
-    }
-
-    const url = `https://explorer.jito.wtf/bundle/${result}`;
-    devLog(`\nJito Bundle Result: ${url}`);
-
-    return result;
-}
-
-/**
- * Gets the status of an in-flight bundle
- * @param {string} bundleId - Bundle ID
- * @returns {Promise<Object|null>} Bundle status
- */
-async function getInFlightBundleStatus(bundleId) {
-    if (!bundleId) {
-        throw new Error('Invalid bundle ID');
-    }
-    
-    const data = {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getInflightBundleStatuses",
-        params: [[bundleId]]
-    };
-
-    try {
-        // Add timeout to fetch
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        
-        const response = await fetch(JitoBlockEngine, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(data),
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const responseData = await response.json();
-
-        if (responseData.error) {
-            throw new Error(`Jito API error: ${responseData.error.message}`);
-        }
-
-        const result = responseData.result.value[0];
-        return result || null;
-    } catch (error) {
-        console.error(formatError(`Error fetching bundle status: ${error.message}`));
-        throw error;
-    }
-}
-
-/**
- * Waits for a bundle to confirm
- * @param {string} bundleId - Bundle ID
- * @returns {Promise<Object>} Bundle confirmation status
- */
-async function waitForBundleConfirmation(bundleId) {
-    const checkInterval = STATUS_CHECK_INTERVAL;
-    let retries = 0;
-    const maxRetries = MAX_BUNDLE_CONFIRMATION_RETRIES;
-
-    while (retries < maxRetries && !isBundleCancelled) {
-        try {
-            const status = await getInFlightBundleStatus(bundleId);
-
-            if (isBundleCancelled) {
-                devLog('Bundle confirmation cancelled by user');
-                return { status: "Failed", reason: "Bundle cancelled by user" };
-            }
-
-            if (status === null) {
-                devLog("Bundle not found. Continuing to wait...");
-            } else {
-                devLog(`Bundle status: ${status.status}`);
-
-                if (status.status === "Landed" || status.status === "Failed") {
-                    return status;
-                }
-            }
-        } catch (error) {
-            console.error(formatError(`Error fetching bundle status: ${error.message}`));
-        }
-
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-        retries++;
-    }
-
-    if (isBundleCancelled) {
-        return { status: "Failed", reason: "Bundle cancelled by user" };
-    }
-
-    return { status: "Failed", reason: "Bundle did not land or fail within expected time" };
-}
-
-/**
- * Handles Jito bundle creation and submission
- * @param {Object} wallet - Wallet object
- * @param {string} initialSwapTransaction - Encoded swap transaction
- * @param {number} tradeAmount - Trade amount
- * @param {Object} initialQuote - Quote from Jupiter
- * @param {boolean} isBuying - Whether this is a buy trade
- * @returns {Promise<Object|null>} Bundle result or null on failure
- */
-async function handleJitoBundle(wallet, initialSwapTransaction, tradeAmount, initialQuote, isBuying) {
-    isBundleCancelled = false;
-    try {
-        devLog(`\nAttempting to send Jito bundle...`);
-
-        if (isBundleCancelled) {
-            devLog('Bundle cancelled, abandoning transaction...');
-            return null;
-        }
-
-        // Deserialize the transaction
-        let transaction;
-        try {
-            const swapTransactionBuf = Buffer.from(initialSwapTransaction, 'base64');
-            transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-        } catch (error) {
-            console.error(formatError(`Failed to deserialize transaction: ${error.message}`));
-            return null;
-        }
-
-        // Get Jito tip amount
-        let tipValueInSol;
-        try {
-            tipValueInSol = await jitoTipCheck();
-        } catch (error) {
-            tipValueInSol = maxJitoTip; // Fallback to max tip if check fails
-        }
-
-        const limitedTipValueInLamports = Math.floor(
-            Math.min(tipValueInSol, maxJitoTip) * 1_000_000_000 * 1.1
-        );
-
-        devLog(`Jito Fee: ${limitedTipValueInLamports / Math.pow(10, 9)} SOL`);
-
-        if (isBundleCancelled) return null;
-
-        // Get fresh blockhash
-        const { blockhash } = await wallet.connection.getLatestBlockhash("confirmed");
-        devLog(`\nNew Blockhash: ${blockhash}`);
-
-        // Create tip transaction with new blockhash
-        const tipAccount = new PublicKey(getRandomTipAccount());
-        const tipIxn = SystemProgram.transfer({
-            fromPubkey: wallet.publicKey,
-            toPubkey: tipAccount,
-            lamports: limitedTipValueInLamports
-        });
-
-        const messageSub = new TransactionMessage({
-            payerKey: wallet.publicKey,
-            recentBlockhash: blockhash,
-            instructions: [tipIxn]
-        }).compileToV0Message();
-
-        const txSub = new VersionedTransaction(messageSub);
-        transaction.message.recentBlockhash = blockhash;
-
-        //incrementTx.sign([wallet.payer]);
-        txSub.sign([wallet.payer]);
-        transaction.sign([wallet.payer]);
-
-        //const bundleToSend = [transaction, txSub, incrementTx]; (Keep the old one spare)
-        const bundleToSend = [transaction, txSub];
-
-        devLog(`Sending bundle with blockhash: ${blockhash}`);
-        const jitoBundleResult = await sendJitoBundle(bundleToSend);
-
-        const swapTxSignature = bs58.default.encode(transaction.signatures[0]);
-        const tipTxSignature = bs58.default.encode(txSub.signatures[0]);
-
-        if (isBundleCancelled) return null;
-
-        devLog(`\nWaiting for bundle confirmation...`);
-        const confirmationResult = await waitForBundleConfirmation(jitoBundleResult);
-
-        if (confirmationResult.status === "Landed") {
-            devLog(`Bundle landed successfully`);
-            return {
-                jitoBundleResult,
-                swapTxSignature,
-                tipTxSignature,
-                finalQuote: initialQuote,
-                ...confirmationResult,
-                finalBlockhash: blockhash
-            };
-        }
-
-        devLog(`\nBundle failed. Blockhash: ${blockhash}`);
-        return null;
-
-    } catch (error) {
-        console.error(formatError(`Bundle execution failed: ${error.message}`));
-        return null;
     }
 }
 
@@ -789,278 +1137,6 @@ function updatePositionFromSwap(position, swapResult, sentiment, currentPrice) {
 }
 
 // ===========================
-// Swap Execution
-// ===========================
-
-/**
- * Executes a swap with exact output amount
- * @param {Object} wallet - Wallet object
- * @param {string} outputMint - Output token mint
- * @param {number} exactOutAmount - Exact output amount
- * @param {string} inputMint - Input token mint
- * @param {Object} trade - Trade object being closed (optional)
- * @param {number} currentPrice - Current token price (optional)
- * @returns {Promise<Object|null>} Swap result or null on failure
- */
-async function executeExactOutSwap(wallet, outputMint, exactOutAmount, inputMint, trade = null, currentPrice = null) {
-    try {
-        devLog("Initiating exact out swap");
-        const baseToken = getBaseToken();
-        const quoteToken = getQuoteToken();
-
-        // Validate inputs
-        if (!wallet || !outputMint || !exactOutAmount || !inputMint) {
-            throw new Error('Missing required parameters for exact out swap');
-        }
-
-        // Determine token decimals based on the output mint
-        const decimals = outputMint === baseToken.ADDRESS ? baseToken.DECIMALS : quoteToken.DECIMALS;
-        const exactOutAmountFloor = Math.floor(exactOutAmount);
-
-        devLog(`Exact Out Swap Details:`, {
-            outputMint: outputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME,
-            inputMint: inputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME,
-            rawAmount: exactOutAmount,
-            adjustedAmount: exactOutAmountFloor,
-            decimals: decimals
-        });
-
-        // Calculate profit-based fee if this is closing a trade
-        let profitFeeBps = 0;
-        if (trade && trade.price && currentPrice !== null) {
-            // Calculate profit based on trade direction
-            const profit = trade.direction === 'buy' ? 
-                (currentPrice - trade.price) * trade.baseTokenAmount :
-                (trade.price - currentPrice) * trade.baseTokenAmount;
-            
-            devLog(`Trade direction: ${trade.direction}, Entry price: ${trade.price}, Current price: ${currentPrice}`);
-            devLog(`Base token amount: ${trade.baseTokenAmount}, Calculated profit: ${profit}`);
-            
-            // Only apply profit fee if positive
-            if (profit > 0) {
-                // Calculate 10% of profit as the fee
-                const profitFee = profit * 0.1;
-                
-                // Calculate the total swap value in quote token
-                const isOutputBase = outputMint === baseToken.ADDRESS;
-                const exactOutAmountDecimal = exactOutAmount / (10 ** (isOutputBase ? baseToken.DECIMALS : quoteToken.DECIMALS));
-                const swapValueInQuote = isOutputBase ? exactOutAmountDecimal * currentPrice : exactOutAmountDecimal;
-                
-                // Calculate fee as basis points of swap value
-                profitFeeBps = Math.round((profitFee / swapValueInQuote) * 10000);
-                
-                devLog(`Profit: ${profit}, Fee: ${profitFee}, Swap Value in Quote: ${swapValueInQuote}, Fee BPS: ${profitFeeBps}`);
-                
-                // Ensure fee doesn't exceed a reasonable limit
-                if (profitFeeBps > 1000) {
-                    devLog(`Profit fee BPS capped from ${profitFeeBps} to 1000`);
-                    profitFeeBps = 1000;
-                }
-            }
-        }
-
-        // Combine fixed fee (1 bps) with profit-based fee
-        const totalFeeBps = 1 + profitFeeBps; // 1 bps fixed fee + profit-based fee
-        
-        // Build params for Jupiter API
-        const params = new URLSearchParams({
-            inputMint: inputMint,
-            outputMint: outputMint,
-            amount: exactOutAmountFloor.toString(),
-            slippageBps: '50',
-            platformFeeBps: totalFeeBps.toString(), // Updated fee structure
-            onlyDirectRoutes: 'false',
-            asLegacyTransaction: 'false',
-            swapMode: 'ExactOut'
-        });
-
-        const quoteUrl = `${BASE_SWAP_URL}/quote?${params.toString()}`;
-        devLog(quoteUrl);
-        
-        // Add timeout to fetch
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), TRANSACTION_TIMEOUT);
-        
-        const response = await fetch(quoteUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const quoteResponse = await response.json();
-
-        // Get fee account and transaction
-        let swapTransaction = await getFeeAccountAndSwapTransaction(
-            new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
-            new PublicKey(inputMint),
-            quoteResponse,
-            wallet
-        );
-
-        if (!swapTransaction) {
-            devLog('Failed to create swap transaction');
-            return null;
-        }
-
-        console.log(formatInfo(`${icons.wait} Awaiting Confirmation...`));
-        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, quoteResponse.inAmount, quoteResponse, inputMint === baseToken.ADDRESS);
-
-        if (!jitoBundleResult) return null;
-
-        console.log(formatInfo(`${icons.info} Updating Trade Information...`));
-        const inputAmount = quoteResponse.inAmount / (10 ** (inputMint === baseToken.ADDRESS ? baseToken.DECIMALS : quoteToken.DECIMALS));
-        const outputAmount = exactOutAmount / (10 ** (outputMint === baseToken.ADDRESS ? baseToken.DECIMALS : quoteToken.DECIMALS));
-
-        // Log the trade
-        logTradeToFile({
-            inputToken: inputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME,
-            outputToken: outputMint === baseToken.ADDRESS ? baseToken.NAME : quoteToken.NAME,
-            inputAmount: inputAmount.toFixed(6),
-            outputAmount: outputAmount.toFixed(6),
-            jitoStatus: 'Success',
-            feeInBps: totalFeeBps // Log the fee rate applied
-        });
-
-        // Calculate changes in base and quote token amounts
-        const baseTokenChange = outputMint === baseToken.ADDRESS ? outputAmount : -inputAmount;
-        const quoteTokenChange = outputMint === quoteToken.ADDRESS ? outputAmount : -inputAmount;
-        const price = Math.abs(quoteTokenChange / baseTokenChange);
-
-        console.log(formatSuccess(`${icons.success} Trade Successful!`));
-        if (profitFeeBps > 0) {
-            console.log(formatInfo(`${icons.profit} Profit fee applied: ${profitFeeBps} bps (10% of profit)`));
-        }
-        
-        return {
-            txId: jitoBundleResult.swapTxSignature,
-            price,
-            baseTokenChange,
-            quoteTokenChange,
-            appliedFeeBps: totalFeeBps,
-            ...jitoBundleResult
-        };
-
-    } catch (error) {
-        console.error(formatError(`Error executing exact out swap: ${error.message}`));
-        return null;
-    }
-}
-
-/**
- * Executes a swap based on sentiment
- * @param {Object} wallet - Wallet object
- * @param {string} sentiment - Market sentiment
- * @returns {Promise<Object|string|null>} Swap result, failure reason, or null
- */
-async function executeSwap(wallet, sentiment) {
-    const settings = readSettings();
-    if (!settings) {
-        console.error(formatError('Failed to read settings'));
-        return null;
-    }
-
-    const baseToken = getBaseToken();
-    const quoteToken = getQuoteToken();
-    
-    let tradeAmount;
-    let isBuying;
-    let inputMint;
-    let outputMint;
-
-    try {
-        devLog("Initiating swap with sentiment:", sentiment);
-
-        // Determine trade direction based on sentiment
-        isBuying = ["EXTREME_FEAR", "FEAR"].includes(sentiment);
-        inputMint = isBuying ? quoteToken.ADDRESS : baseToken.ADDRESS;
-        outputMint = isBuying ? baseToken.ADDRESS : quoteToken.ADDRESS;
-        const balance = isBuying ? wallet.quoteBalance : wallet.baseBalance;
-
-        // Calculate trade amount
-        tradeAmount = calculateTradeAmount(balance, sentiment, isBuying ? quoteToken : baseToken);
-
-        if (!tradeAmount || tradeAmount <= 0) {
-            devLog('Invalid trade amount calculated');
-            return null;
-        }
-
-        devLog(`Calculated trade amount: ${tradeAmount}`);
-
-        // Get initial quote
-        let quoteResponse = await getQuote(inputMint, outputMint, tradeAmount);
-        if (!quoteResponse) {
-            devLog('Failed to get quote');
-            return null;
-        }
-
-        // Get transaction
-        let swapTransaction = await getFeeAccountAndSwapTransaction(
-            new PublicKey("DGQRoyxV4Pi7yLnsVr1sT9YaRWN9WtwwcAiu3cKJsV9p"),
-            new PublicKey(inputMint),
-            quoteResponse,
-            wallet
-        );
-
-        if (!swapTransaction) {
-            devLog('Failed to create swap transaction');
-            return null;
-        }
-
-        console.log(formatInfo(`${icons.wait} Awaiting Confirmation...`));
-        const jitoBundleResult = await handleJitoBundle(wallet, swapTransaction, tradeAmount, quoteResponse, isBuying);
-
-        if (!jitoBundleResult) return null;
-
-        console.log(formatInfo(`${icons.info} Updating Trade Information...`));
-        // Calculate final amounts for successful trade
-        const inputAmount = tradeAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS));
-        const outputAmount = jitoBundleResult.finalQuote.outAmount / (10 ** (isBuying ? baseToken.DECIMALS : quoteToken.DECIMALS));
-
-        // Log the trade
-        logTradeToFile({
-            inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
-            outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
-            inputAmount: inputAmount.toFixed(6),
-            outputAmount: outputAmount.toFixed(6),
-            jitoStatus: 'Success'
-        });
-
-        // Calculate token changes using token-agnostic approach
-        const baseTokenChange = isBuying ? jitoBundleResult.finalQuote.outAmount / (10 ** baseToken.DECIMALS) : -tradeAmount / (10 ** baseToken.DECIMALS);
-        const quoteTokenChange = isBuying ? -tradeAmount / (10 ** quoteToken.DECIMALS) : jitoBundleResult.finalQuote.outAmount / (10 ** quoteToken.DECIMALS);
-        const price = Math.abs(quoteTokenChange / baseTokenChange);
-
-        console.log(formatSuccess(`${icons.success} Trade Successful!`));
-        lastTradeTime.set(wallet.publicKey.toString(), Date.now());
-        return {
-            txId: jitoBundleResult.swapTxSignature,
-            price,
-            baseTokenChange,
-            quoteTokenChange,
-            ...jitoBundleResult
-        };
-
-    } catch (error) {
-        console.error(formatError(`Error executing swap: ${error.message}`));
-        
-        // Log failed trade
-        const baseToken = getBaseToken();
-        const quoteToken = getQuoteToken();
-        
-        logTradeToFile({
-            inputToken: isBuying ? quoteToken.NAME : baseToken.NAME,
-            outputToken: isBuying ? baseToken.NAME : quoteToken.NAME,
-            inputAmount: tradeAmount ? (tradeAmount / (10 ** (isBuying ? quoteToken.DECIMALS : baseToken.DECIMALS))).toFixed(6) : '0',
-            outputAmount: '0',
-            jitoStatus: 'Failed'
-        });
-
-        return null;
-    }
-}
-
-// ===========================
 // Position Management
 // ===========================
 
@@ -1073,15 +1149,12 @@ async function resetPosition() {
     
     try {
         // Get updated wallet and connection
-        wallet = getWallet();
-        connection = getConnection();
+        const wallet = getWallet();
+        const connection = getConnection();
         
         // Get token configurations
         const baseToken = getBaseToken();
         const quoteToken = getQuoteToken();
-
-        // Cancel any pending transactions
-        cancelPendingBundle();
 
         if (!wallet || !connection) {
             throw new Error("Wallet or connection is not initialised in resetPosition");
@@ -1093,12 +1166,17 @@ async function resetPosition() {
         
         // Create new position
         const Position = require('./Position'); // Dynamically import to avoid circular dependencies
-        position = new Position(baseBalance, quoteBalance, currentPrice);
+        const position = new Position(baseBalance, quoteBalance, currentPrice);
         
         // Update orderBook storage path for current tokens then reset trades
-        orderBook.updateStoragePathForTokens();
-        orderBook.trades = [];
-        orderBook.saveTrades();
+        const orderBook = global.orderBook; // Assuming orderBook is globally available
+        if (orderBook) {
+            orderBook.updateStoragePathForTokens();
+            orderBook.trades = [];
+            orderBook.saveTrades();
+        } else {
+            devLog("Warning: orderBook not available, skipping orderBook reset");
+        }
 
         // Get current fear & greed index
         const fearGreedIndex = await fetchFearGreedIndex();
@@ -1107,7 +1185,7 @@ async function resetPosition() {
         
         // Create initial data for UI
         const initialData = {
-            timestamp: getTimestamp(),
+            timestamp: formatTime(new Date()), // Assuming formatTime is available
             price: currentPrice,
             fearGreedIndex,
             sentiment,
@@ -1133,7 +1211,7 @@ async function resetPosition() {
         // Set initial data and emit to UI
         const { setInitialData, emitTradingData, clearRecentTrades, saveState } = require('./pulseServer');
         setInitialData(initialData);
-        emitTradingData({ ...initialData, version: getVersion() });
+        emitTradingData({ ...initialData, version: getVersion() }); // Assuming getVersion is available
         clearRecentTrades();
 
         // Save initial state
@@ -1158,7 +1236,7 @@ async function resetPosition() {
             },
             tradingData: initialData,
             settings: readSettings(),
-            orderBook: orderBook.getState()
+            orderBook: orderBook ? orderBook.getState() : {}
         });
         
         devLog(`Position reset successfully. ${baseToken.NAME} Balance: ${formatTokenAmount(baseBalance, baseToken)}, ${quoteToken.NAME} Balance: ${formatTokenAmount(quoteBalance, quoteToken)}`);
@@ -1176,7 +1254,6 @@ async function resetPosition() {
 
 module.exports = {
     executeSwap,
-    executeExactOutSwap,
     logTradeToFile,
     calculateTradeAmount,
     updatePortfolioBalances,
@@ -1184,8 +1261,10 @@ module.exports = {
     logPositionUpdate,
     getTokenBalance,
     resetPosition,
-    handleJitoBundle,
-    cancelPendingBundle,
+    // Jupiter ULTRA exports
+    getJupiterUltraOrder,
+    executeJupiterUltraOrder,
+    cancelJupiterTransactions,
     // Token-agnostic exports
     BASE_TOKEN,
     QUOTE_TOKEN

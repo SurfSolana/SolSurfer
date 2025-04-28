@@ -140,6 +140,17 @@ function calculateTargetAllocations(isHighSOL, portfolioValue, currentPrice, all
     // Convert SOL value to tokens
     const targetSOLTokens = targetSOLValue / currentPrice;
     
+    // Log detailed allocation information
+    devLog(`Target Allocation Calculation:
+    - Portfolio Value: ${portfolioValue}
+    - Current Price: ${currentPrice}
+    - Target ${baseToken.NAME} %: ${targetSOLPercentage}%
+    - Target ${quoteToken.NAME} %: ${targetUSDCPercentage}%
+    - Target ${baseToken.NAME} Value: ${targetSOLValue}
+    - Target ${quoteToken.NAME} Value: ${targetUSDCValue}
+    - Target ${baseToken.NAME} Tokens: ${targetSOLTokens}
+    `);
+    
     return {
         baseToken: {
             symbol: baseToken.NAME,
@@ -175,49 +186,22 @@ function calculateRebalanceTrade(currentAllocations, targetAllocations, threshol
     // Determine trade direction
     const isBuyingBase = baseDifference > 0;
     
-    // Apply minimum trade threshold
+    // Apply minimum trade threshold only to avoid tiny trades
     const MIN_TRADE_AMOUNT = thresholdSettings.MIN_TRADE_AMOUNT || 0.00001;
     if (Math.abs(baseDifference) < MIN_TRADE_AMOUNT) {
         devLog(`Trade amount (${Math.abs(baseDifference)}) below minimum threshold (${MIN_TRADE_AMOUNT}), skipping`);
         return null;
     }
     
-    let baseAmount, quoteAmount;
-    
-    if (isBuyingBase) {
-        // Buying base token (SOL)
-        baseAmount = baseDifference;
-        quoteAmount = -Math.abs(quoteDifference);
-        
-        // Check if we have enough quote tokens
-        if (currentAllocations.quoteToken.tokens < Math.abs(quoteAmount)) {
-            devLog(`Not enough ${quoteToken.NAME} for trade. Need ${Math.abs(quoteAmount)}, have ${currentAllocations.quoteToken.tokens}`);
-            // Adjust trade size to what we can afford
-            quoteAmount = -currentAllocations.quoteToken.tokens * 0.99; // Leave 1% buffer
-            baseAmount = Math.abs(quoteAmount) / currentAllocations.price; // Recalculate SOL amount
-        }
-    } else {
-        // Selling base token (SOL)
-        baseAmount = baseDifference; // Will be negative
-        quoteAmount = Math.abs(quoteDifference);
-        
-        // Check if we have enough base tokens
-        if (currentAllocations.baseToken.tokens < Math.abs(baseAmount)) {
-            devLog(`Not enough ${baseToken.NAME} for trade. Need ${Math.abs(baseAmount)}, have ${currentAllocations.baseToken.tokens}`);
-            // Adjust trade size to what we can afford
-            baseAmount = -currentAllocations.baseToken.tokens * 0.99; // Leave 1% buffer
-            quoteAmount = Math.abs(baseAmount) * currentAllocations.price; // Recalculate USDC amount
-        }
-    }
-    
     return {
-        baseTokenChange: baseAmount,
-        quoteTokenChange: quoteAmount,
+        baseTokenChange: baseDifference,
+        quoteTokenChange: quoteDifference,
         isBuyingBase,
         inputToken: isBuyingBase ? quoteToken.ADDRESS : baseToken.ADDRESS,
         outputToken: isBuyingBase ? baseToken.ADDRESS : quoteToken.ADDRESS,
-        inputAmount: isBuyingBase ? Math.abs(quoteAmount) : Math.abs(baseAmount),
-        type: isBuyingBase ? 'buy' : 'sell'
+        inputAmount: isBuyingBase ? Math.abs(quoteDifference) : Math.abs(baseDifference),
+        type: isBuyingBase ? 'buy' : 'sell',
+        exactOutputAmount: isBuyingBase ? Math.abs(baseDifference) : Math.abs(quoteDifference)
     };
 }
 
@@ -266,6 +250,21 @@ function getCurrentAllocations(baseBalance, quoteBalance, currentPrice) {
 function updateAllocationState(isHighSOL) {
     thresholdState.inHighAllocation = isHighSOL;
     devLog(`Allocation state updated: inHighSOL = ${isHighSOL}`);
+    
+    // Reset counters after successful trade to prevent immediate re-trading
+    if (isHighSOL) {
+        thresholdState.daysBelowThreshold = 0;
+    } else {
+        thresholdState.daysAboveThreshold = 0;
+    }
+    
+    // Record the allocation change with timestamp
+    thresholdState.lastAllocationChange = {
+        timestamp: new Date().toISOString(),
+        isHighSOL: isHighSOL
+    };
+    
+    devLog(`Allocation state updated: ${JSON.stringify(thresholdState)}`);
 }
 
 module.exports = {
